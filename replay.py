@@ -7,7 +7,7 @@ class ReplayBuffer:
   episode: List[Tuple[np.ndarray, ...]]
   buffer: List[Tuple[np.ndarray, ...]]
 
-  def __init__(self, size):
+  def __init__(self, size:int):
     self.current_size = 0
     self.max_size = size
     self.buffer = []
@@ -51,7 +51,7 @@ class ReplayBuffer:
       mask[i,:e-s] = 1
     columns.append(mask)
 
-    return columns
+    return tuple(columns)
 
 
 # TESTING
