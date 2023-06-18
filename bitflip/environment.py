@@ -12,6 +12,7 @@ class BitflipEnvironment:
   def reset(self):
     self.state = self.random_state()
     self.goal = self.random_state()
+    return self.state, self.goal
 
   def random_state(self):
     state = np.random.randint(0, 2 ** self.bit_length)
@@ -19,4 +20,4 @@ class BitflipEnvironment:
 
   def step(self, action):
     self.state[action] = ~self.state[action]
-    return self.state.copy(), self.goal.copy(), np.all(self.state == self.goal)
+    return self.state.copy(), np.all(self.state == self.goal)

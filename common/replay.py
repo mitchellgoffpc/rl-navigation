@@ -13,6 +13,12 @@ class ReplayBuffer:
     self.buffer = []
     self.episode = []
 
+  def __len__(self) -> int:
+    return len(self.buffer)
+
+  def num_steps(self) -> int:
+    return sum(len(x[0]) for x in self.buffer)
+
   def add_step(self, *data:np.ndarray):
     self.episode.append(data)
 

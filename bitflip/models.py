@@ -10,7 +10,8 @@ class BitflipAgent(nn.Module):
     self.fc3 = nn.Linear(hidden_size // 2, bit_length)
 
   def forward(self, inputs, goals):
-    input = torch.cat((inputs, goals), dim=1).float()
+    inputs, goals = (torch.as_tensor(x) for x in (inputs, goals))
+    input = torch.cat((inputs, goals), dim=-1).float()
     x = F.relu(self.fc1(input))
     x = F.relu(self.fc2(x))
     return self.fc3(x)
