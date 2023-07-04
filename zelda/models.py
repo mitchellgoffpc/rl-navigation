@@ -4,7 +4,7 @@ import torch.nn.functional as F
 import torchvision
 
 INPUT_SIZE = (3, 224, 240)
-NUM_ACTIONS = 8
+NUM_ACTIONS = 4
 
 class ZeldaAgent(nn.Module):
   def __init__(self, hidden_size):
@@ -20,8 +20,9 @@ class ZeldaAgent(nn.Module):
 
   def forward(self, state, goal):
     *b,h,w,c = state.shape
-    state = torch.as_tensor(state).view(-1,h,w,c).permute(0,3,1,2).contiguous().float()
-    goal = torch.as_tensor(goal).view(-1,h,w,c).permute(0,3,1,2).contiguous().float()
+    device = self.fc1.weight.device
+    state = torch.as_tensor(state).view(-1,h,w,c).permute(0,3,1,2).contiguous().float().to(device)
+    goal = torch.as_tensor(goal).view(-1,h,w,c).permute(0,3,1,2).contiguous().float().to(device)
     x = torch.cat([state, goal], dim=1)
     x = self.conv1(x)
     x = self.backbone(x).flatten(start_dim=1)  # No relu for now

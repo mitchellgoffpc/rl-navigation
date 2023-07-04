@@ -6,10 +6,16 @@ import argparse
 import numpy as np
 from zelda.environment import ZeldaEnvironment
 
-KEYMAP = [pygame.K_j, pygame.K_k, pygame.K_g, pygame.K_h, pygame.K_w, pygame.K_s, pygame.K_a, pygame.K_d]
+KEYMAP = {
+  pygame.K_j: ZeldaEnvironment.A,
+  pygame.K_k: ZeldaEnvironment.B,
+  pygame.K_g: ZeldaEnvironment.SELECT,
+  pygame.K_h: ZeldaEnvironment.START,
+  pygame.K_w: ZeldaEnvironment.UP,
+  pygame.K_s: ZeldaEnvironment.DOWN,
+  pygame.K_a: ZeldaEnvironment.LEFT,
+  pygame.K_d: ZeldaEnvironment.RIGHT}
 
-def get_action(keys):
-  return sum((1 << i) * k for i, k in enumerate(keys))
 
 def step_from_keyboard(env):
   for event in pygame.event.get():
@@ -18,20 +24,21 @@ def step_from_keyboard(env):
 
   pressed = pygame.key.get_pressed()
   running = not pressed[pygame.K_ESCAPE] and not pressed[pygame.K_q]
-  action = get_action([pressed[key] for key in KEYMAP])
+  action = sum(KEYMAP[k] for k in KEYMAP if pressed[k])
   if pressed[pygame.K_r]:
-    frame = env.reset()
+    frame, info = env.reset()
   else:
-    frame, _, _, _ = env.step(action)
-  return frame, running
+    frame, info = env.step(action)
+  return frame, info, running
 
-def step_from_model(model, frame, goal):
+def step_from_model(env, model, frame, goal):
   torch_frame = torch.as_tensor(frame[None]).permute(0,3,1,2).float()
   torch_goal = torch.as_tensor(goal[None]).permute(0,3,1,2).float()
   action_probs = agent(torch_frame, torch_goal)[0]
   # action = torch.argmax(action_probs)
   action, = random.choices(range(len(action_probs)), weights=torch.softmax(action_probs, 0))
-  return action, True, False
+  frame, info = env.step(action)
+  return frame, info, False
 
 
 # ENTRY POINT
@@ -42,7 +49,8 @@ if __name__ == '__main__':
   args = parser.parse_args()
 
   env = ZeldaEnvironment()
-  frame = env.reset()
+  frame, _ = env.reset()
+  goal_pos = (120, 120, 7, 7)
   screen_h, screen_w = frame.shape[0] * 2, frame.shape[1] * 2
 
   pygame.init()
@@ -63,15 +71,15 @@ if __name__ == '__main__':
   running = True
   while running:
     if args.model:
-      frame, running = step_from_model(env, model, frame, goal)
+      frame, info, running = step_from_model(env, model, frame, goal)
     else:
-      frame, running = step_from_keyboard(env)
+      frame, info, running = step_from_keyboard(env)
 
-    pos_x, pos_y = env.screen_pos
-    map_x, map_y = env.map_pos
+    pos_x, pos_y, map_x, map_y = info['pos']
     footer = np.zeros((screen_h // 8, screen_w, 3), dtype=np.uint8)
     frame = cv2.resize(frame, (screen_w, screen_h))
-    cv2.putText(footer, f'POS: X={pos_x}, Y={pos_y} | MAP: X={map_x}, Y={map_y}', (10,screen_h//8-15), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255))
+    footer_msg = f'POS: X={pos_x}, Y={pos_y} | MAP: X={map_x}, Y={map_y} | DONE: {env.pos_matches(info["pos"], goal_pos)}'
+    cv2.putText(footer, footer_msg, (10,screen_h//8-15), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255))
     frame = np.concatenate([frame, footer], axis=0)
     draw(frame)
     time.sleep(0.01)

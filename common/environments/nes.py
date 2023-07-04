@@ -1,6 +1,6 @@
-from nes_py import NESEnv as RawNESEnv
+from nes_py import NESEnv
 
-class NESEnvironment:
+class NESEnvironment(NESEnv):
   A      = 1 << 0
   B      = 1 << 1
   SELECT = 1 << 2
@@ -11,21 +11,21 @@ class NESEnvironment:
   RIGHT  = 1 << 7
 
   def __init__(self, path):
-    self.nes = RawNESEnv(str(path))
+    super().__init__(str(path))
 
   def reset(self):
-    return self.nes.reset()
+    return super().reset()
 
   def wait(self, n_frames):
     for _ in range(n_frames):
-      frame, _, _, _ = self.nes.step(0)
+      frame, _, _, _ = super().step(0)
     return frame.copy()
 
   def step(self, action, wait=None):
     if wait is not None:
-      self.nes.step(action)
+      super().step(action)
       return self.wait(wait)
     else:
       # ugh who thought it was a good idea to reuse the obs buffer...
-      obs, state, data, info = self.nes.step(action)
-      return obs.copy(), state, data, info
+      obs, reward, done, info = super().step(action)
+      return obs.copy()

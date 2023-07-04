@@ -16,9 +16,21 @@ class ZeldaEnvironment(NESEnvironment):
     self.step(self.START, wait=20)
     return self.step(self.START, wait=120)
 
+  def step(self, *args, **kwargs):
+    obs = super().step(*args, **kwargs)
+    pos_x, pos_y = self.screen_pos
+    map_x, map_y = self.map_pos
+    info = {'pos': (pos_x, pos_y, map_x, map_y)}
+    return obs, info
+
+  def pos_matches(self, a, b):
+    ax, ay, amx, amy = a
+    bx, by, bmx, bmy = b
+    return abs(ax - bx) <= 8 and abs(ay - by) <= 8 and (amx, amy) == (bmx, bmy)
+
   @property
   def memory(self):
-    return self.nes.ram
+    return self.ram
 
   @property
   def screen_pos(self):
