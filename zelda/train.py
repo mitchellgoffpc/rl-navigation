@@ -52,20 +52,20 @@ def train(config):
 
     replay.commit()
 
-    # # Train the agent
-    # if replay.num_steps() > config.batch_size:
-    #   states, goals, actions, next_states, finished, _ = (x.squeeze() for x in replay.sample(config.batch_size))
-    #
-    #   with torch.no_grad():
-    #     best_future_distances = torch.clip(agent(next_states, goals).min(dim=-1).values * ~finished, 0, config.bit_length)
-    #   distances = agent(states, goals)[torch.arange(len(actions)), actions]
-    #   loss = F.smooth_l1_loss(distances, best_future_distances + 1)
-    #   loss.backward()
-    #
-    #   optimizer.step()
-    #   optimizer.zero_grad()
-    #
-    # metrics.add({"Wins": done, "Episode Length": step, "Epsilon": epsilon})
+    # Train the agent
+    if len(replay) > config.batch_size:
+      states, goals, actions, next_states, mask = replay.sample(config.batch_size)
+
+      with torch.no_grad():
+        best_future_distances = torch.clip(agent(next_states, goals).min(dim=-1).values * ~finished, 0, config.bit_length)
+      distances = agent(states, goals)[torch.arange(len(actions)), actions]
+      loss = F.smooth_l1_loss(distances, best_future_distances + 1)
+      loss.backward()
+
+      optimizer.step()
+      optimizer.zero_grad()
+
+    metrics.add({"Wins": done, "Episode Length": step, "Epsilon": epsilon})
     metrics.add({"Episode Length": step})
 
 

@@ -15,3 +15,15 @@ class ZeldaEnvironment(NESEnvironment):
       self.step(self.SELECT, wait=1)
     self.step(self.START, wait=20)
     return self.step(self.START, wait=120)
+
+  @property
+  def memory(self):
+    return self.nes.ram
+
+  @property
+  def screen_pos(self):
+    return self.memory[0x70], self.memory[0x84]
+
+  @property
+  def map_pos(self):
+    return self.memory[0xEB] % 0x10, self.memory[0xEB] // 0x10
