@@ -27,9 +27,7 @@ def train(config):
   metrics = Metrics(config.report_interval, metric_types)
   replay = ReplayBuffer(config.replay_buffer_size)
   env = ZeldaEnvironment()
-
-  device = torch.device('mps')
-  agent = ZeldaAgent(config.hidden_size).to(device)
+  agent = ZeldaAgent(config.hidden_size).to(config.device)
   optimizer = torch.optim.Adam(agent.parameters(), lr=config.lr)
 
   for episode_counter in range(1, config.num_episodes + 1):
@@ -65,7 +63,7 @@ def train(config):
       with torch.no_grad():
         best_future_distances = torch.clip(agent(next_states, goals).cpu().min(dim=-1).values * ~torch.as_tensor(finished), 0, config.max_episode_length)
       distances = agent(states, goals)[torch.arange(len(actions)), actions]
-      loss = F.smooth_l1_loss(distances, best_future_distances.to(device) + 1)
+      loss = F.smooth_l1_loss(distances, best_future_distances.to(config.device) + 1)
       loss.backward()
 
       optimizer.step()

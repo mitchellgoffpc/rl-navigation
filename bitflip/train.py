@@ -6,12 +6,12 @@ from dataclasses import dataclass
 
 from common.metrics import Metrics, MetricType
 from common.replay import ReplayBuffer
-from common.config import BaseConfig
+from common.config import BaseTrainingConfig
 from bitflip.models import BitflipAgent
 from bitflip.environment import BitflipEnvironment
 
 @dataclass
-class BitflipConfig(BaseConfig):
+class BitflipConfig(BaseTrainingConfig):
   lr: float = 0.0003
   bit_length: int = 32
   hidden_size: int = 128
@@ -32,7 +32,7 @@ def train(config):
   metrics = Metrics(config.report_interval, metric_types)
   replay = ReplayBuffer(config.replay_buffer_size)
   env = BitflipEnvironment(config.bit_length)
-  agent = BitflipAgent(config.hidden_size, config.bit_length)
+  agent = BitflipAgent(config.hidden_size, config.bit_length).to(config.device)
   optimizer = torch.optim.Adam(agent.parameters(), lr=config.lr)
 
   for episode_counter in range(1, config.num_episodes + 1):
@@ -44,7 +44,7 @@ def train(config):
       # Epsilon-greedy exploration strategy
       if np.random.uniform() > epsilon:
         with torch.no_grad():
-          distances = agent(state[None], goal[None])
+          distances = agent(state[None], goal[None]).cpu()
           action = torch.argmin(distances).numpy()
       else:
         action = np.random.randint(0, config.bit_length)
@@ -64,7 +64,8 @@ def train(config):
         use_alt_goals = np.random.uniform(size=config.batch_size) < config.goal_replacement_prob
         alt_goal_idxs = np.random.randint(0, np.sum(mask, axis=-1))
         goals = np.where(use_alt_goals[:,None], states[np.arange(len(states)), alt_goal_idxs], goals[:,0])
-        finished = np.where(use_alt_goals, alt_goal_idxs == 0, finished[:,0])
+        finished = np.where(use_alt_goals, alt_goal_idxs <= 1, finished[:,0])
+        finished = torch.as_tensor(finished).to(config.device)
         states, actions, next_states = (x[:,0] for x in (states, actions, next_states))
 
         with torch.no_grad():

@@ -16,3 +16,12 @@ class BaseConfig(ABC):
   @classmethod
   def from_cli(cls, **kwargs):
     return cls.merge(cls, kwargs, OmegaConf.from_cli())
+
+
+class BaseTrainingConfig(BaseConfig):
+  device_name: str = 'cpu'
+
+  @property
+  def device(self):
+    import torch
+    return torch.device(self.device_name)
