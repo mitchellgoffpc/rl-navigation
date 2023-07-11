@@ -65,11 +65,10 @@ def train(config):
         alt_goal_idxs = np.random.randint(0, np.sum(mask, axis=-1))
         goals = np.where(use_alt_goals[:,None], states[np.arange(len(states)), alt_goal_idxs], goals[:,0])
         finished = np.where(use_alt_goals, alt_goal_idxs <= 1, finished[:,0])
-        finished = torch.as_tensor(finished).to(config.device)
         states, actions, next_states = (x[:,0] for x in (states, actions, next_states))
 
         with torch.no_grad():
-          best_future_distances = torch.clip(agent(next_states, goals).min(dim=-1).values * ~finished, 0, config.max_episode_length)
+          best_future_distances = torch.clip(agent(next_states, goals).cpu().min(dim=-1).values * ~torch.as_tensor(finished), 0, config.max_episode_length)
         distances = agent(states, goals)[torch.arange(len(actions)), actions]
         loss = F.smooth_l1_loss(distances, best_future_distances + 1)
         loss.backward()
