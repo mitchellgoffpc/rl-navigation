@@ -1,3 +1,4 @@
+import time
 import numpy as np
 from enum import Enum
 from typing import List, Dict, Any
@@ -18,6 +19,7 @@ class Metrics:
     self.reset()
 
   def reset(self):
+    self.last_report_time = time.time()
     self.metrics = {}
 
   def add(self, data:Dict[str, Any]):
@@ -38,4 +40,5 @@ class Metrics:
         metrics.append("{k}: {v:<4}".format(k=k, v=np.sum(v)))
       else:
         metrics.append("{k}: {v:.2f}".format(k=k, v=np.mean(v)))
+    metrics.append(f"Time: {time.time() - self.last_report_time:.2f}s")
     print(" | ".join(metrics))

@@ -9,7 +9,7 @@ NUM_ACTIONS = 4
 class ZeldaAgent(nn.Module):
   def __init__(self):
     super().__init__()
-    resnet = torchvision.models.resnet18(weights=torchvision.models.ResNet18_Weights.DEFAULT)
+    resnet = torchvision.models.resnet18() # weights=torchvision.models.ResNet18_Weights.DEFAULT)
     self.backbone = torch.nn.Sequential(*list(resnet.children())[1:-2])
     self.conv1 = nn.Conv2d(6, 64, kernel_size=7, stride=2, padding=3, bias=False)
     self.conv2 = nn.Conv2d(512, 16, kernel_size=1, bias=False)

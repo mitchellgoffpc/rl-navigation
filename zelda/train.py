@@ -13,9 +13,9 @@ from zelda.environment import ZeldaEnvironment
 @dataclass
 class ZeldaConfig(BaseTrainingConfig):
   lr: float = 0.0003
-  batch_size: int = 32
+  batch_size: int = 128
   num_episodes: int = 1000
-  max_episode_length: int = 6
+  max_episode_length: int = 8
   replay_buffer_size: int = 1000
   goal_replacement_prob: float = 0.8
   num_train_steps: int = 1
@@ -38,19 +38,14 @@ def train(config):
   for _ in range(1*8):
     goal, info = env.step(env.LEFT)
   goal_pos = info['pos']
-  # import matplotlib.pyplot as plt
-  # plt.imshow(goal)
-  # plt.show()
 
   for episode_counter in range(1, config.num_episodes + 1):
     epsilon = max(0.00, 1. - 2 * float(episode_counter) / config.num_episodes)
 
     # Roll out an episode
     state, _ = env.reset()
-    if len(replay) and np.random.uniform() < 0.5:
+    if len(replay):
       _, _, _, goal, _, goal_pos, _ = (x.squeeze() for x in replay.sample(1))
-    # else:
-    #   goal, goal_pos = np.zeros(INPUT_SIZE, dtype=np.uint8), (120, 120, 7, 7)
 
     for step in range(1, config.max_episode_length + 1):
       # Epsilon-greedy exploration strategy
@@ -72,7 +67,7 @@ def train(config):
     replay.commit()
 
     # Train the agent
-    if len(replay) > config.batch_size:
+    if replay.num_steps() > config.batch_size:
       for _ in range(config.num_train_steps):
         # states, goals, actions, next_states, finished, _, mask = (x.squeeze(1) for x in replay.sample(config.batch_size))
         states, goals, actions, next_states, finished, _, mask = replay.sample(config.batch_size, config.max_episode_length)

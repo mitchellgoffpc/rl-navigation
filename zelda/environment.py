@@ -4,8 +4,6 @@ from common.environments.nes import NESEnvironment
 class ZeldaEnvironment(NESEnvironment):
   def __init__(self):
     super().__init__(Path(__file__).parent / f"zelda.nes")
-
-  def reset(self):
     super().reset()
     self.wait(40)
     self.step(self.START, wait=20)
@@ -14,7 +12,12 @@ class ZeldaEnvironment(NESEnvironment):
     for _ in range(3):
       self.step(self.SELECT, wait=1)
     self.step(self.START, wait=20)
-    return self.step(self.START, wait=120)
+    self.step(self.START, wait=120)
+    self._backup()
+
+  def reset(self):
+    self._restore()
+    return self.step(0)
 
   def step(self, *args, **kwargs):
     obs = super().step(*args, **kwargs)
@@ -24,9 +27,9 @@ class ZeldaEnvironment(NESEnvironment):
     return obs, info
 
   def pos_matches(self, a, b):
-    ax, ay, amx, amy = a
-    bx, by, bmx, bmy = b
-    return abs(ax - bx) <= 8 and abs(ay - by) <= 8 and (amx, amy) == (bmx, bmy)
+    ax, ay, amx, amy = map(int, a)
+    bx, by, bmx, bmy = map(int, b)
+    return abs(ax - bx) <= 4 and abs(ay - by) <= 4 and (amx, amy) == (bmx, bmy)
 
   @property
   def memory(self):
