@@ -16,11 +16,11 @@ class GridConfig(BaseTrainingConfig):
   grid_size: int = 4
   batch_size: int = 512
   hidden_size: int = 128
-  num_episodes: int = 10000
+  num_episodes: int = 1000
   max_episode_length: int = 8
   replay_buffer_size: int = 1000
-  goal_replacement_prob: float = 0.0
-  num_train_steps: int = 1
+  goal_replacement_prob: float = 0.5
+  num_train_steps: int = 4
   report_interval: int = 100
   device_name: str = 'cpu'
 
@@ -48,7 +48,7 @@ def train(config):
         action = np.random.randint(0, NUM_ACTIONS)
 
       next_state, _, done, info = env.step(action)
-      replay.add_step(state, goal, action, next_state, done)
+      replay.add_step(state, goal, action, next_state, done, info['pos'], info['goal_pos'])
       state = next_state
       if done:
         break
@@ -58,18 +58,24 @@ def train(config):
     # Train the agent
     if replay.num_steps() > config.batch_size:
       for _ in range(config.num_train_steps):
-        states, goals, actions, next_states, finished, mask = (x.squeeze(1) for x in replay.sample(config.batch_size))
-        # states, goals, actions, next_states, finished, mask = replay.sample(config.batch_size, config.max_episode_length)
-        # use_alt_goals = np.random.uniform(size=config.batch_size) < config.goal_replacement_prob
-        # alt_goal_idxs = np.random.randint(0, np.sum(mask, axis=-1))
-        # goals = np.where(use_alt_goals[:,None,None], states[np.arange(len(states)), alt_goal_idxs], goals[:,0])
-        # finished = np.where(use_alt_goals, alt_goal_idxs <= 1, finished[:,0])
-        # states, actions, next_states = (x[:,0] for x in (states, actions, next_states))
+        # states, goals, actions, next_states, finished, pos, goal_pos, mask = (x.squeeze(1) for x in replay.sample(config.batch_size))
+        states, goals, actions, next_states, finished, pos, goal_pos, mask = replay.sample(config.batch_size, config.max_episode_length)
+        use_alt_goals = np.random.uniform(size=config.batch_size) < config.goal_replacement_prob
+        alt_goal_idxs = np.random.randint(0, np.sum(mask, axis=-1))
+        goals = np.where(use_alt_goals[:,None,None], states[np.arange(len(states)), alt_goal_idxs], goals[:,0])
+        goal_pos = np.where(use_alt_goals[:,None], pos[np.arange(len(pos)), alt_goal_idxs], goal_pos[:,0])
+        finished = np.where(use_alt_goals, np.all(pos[:,0] == goal_pos, axis=-1), finished[:,0])
+        states, actions, next_states, pos = (x[:,0] for x in (states, actions, next_states, pos))
 
-        with torch.no_grad():
-          best_future_distances = torch.clip(agent(next_states, goals).cpu().min(dim=-1).values * ~torch.as_tensor(finished), 0, config.max_episode_length)
+        # with torch.no_grad():
+        #   best_future_distances = torch.clip(agent(next_states, goals).cpu().min(dim=-1).values * ~torch.as_tensor(finished), 0, config.max_episode_length)
+        # distances = agent(states, goals)[torch.arange(len(actions)), actions]
+        # loss = F.smooth_l1_loss(distances, best_future_distances.to(config.device) + 1)
+        # loss.backwards()
+
         distances = agent(states, goals)[torch.arange(len(actions)), actions]
-        loss = F.smooth_l1_loss(distances, best_future_distances.to(config.device) + 1)
+        targets = np.sum(np.abs(pos - goal_pos), axis=-1)
+        loss = F.smooth_l1_loss(distances, torch.as_tensor(targets))
         loss.backward()
 
         optimizer.step()
