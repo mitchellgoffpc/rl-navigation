@@ -12,7 +12,7 @@ class GridEnvironment:
     self.goal_pos = [np.random.randint(self.grid_h), np.random.randint(self.grid_w)]
     self.grid[tuple(self.pos)] = 1
     self.goal[tuple(self.goal_pos)] = 1
-    return self.grid, self.goal
+    return self.grid.copy(), self.goal.copy()
 
   def step(self, action):
     self.grid[tuple(self.pos)] = 0

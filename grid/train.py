@@ -5,7 +5,7 @@ import torch.nn.functional as F
 from dataclasses import dataclass
 
 from common.metrics import Metrics, MetricType
-from common.replay import ReplayBuffer
+from common.graph import ReplayGraph
 from common.config import BaseTrainingConfig
 from grid.models import GridAgent, NUM_ACTIONS
 from grid.environment import GridEnvironment
@@ -16,7 +16,7 @@ class GridConfig(BaseTrainingConfig):
   grid_size: int = 4
   batch_size: int = 512
   hidden_size: int = 128
-  num_episodes: int = 1000
+  num_episodes: int = 10000
   max_episode_length: int = 8
   replay_buffer_size: int = 1000
   goal_replacement_prob: float = 0.5
@@ -28,7 +28,7 @@ class GridConfig(BaseTrainingConfig):
 def train(config):
   metric_types = {"Wins": MetricType.SUM, "Episode Length": MetricType.MEAN, "Epsilon": MetricType.MEAN}
   metrics = Metrics(config.report_interval, metric_types)
-  replay = ReplayBuffer(config.replay_buffer_size)
+  replay = ReplayGraph(config.replay_buffer_size)
   env = GridEnvironment(config.grid_size, config.grid_size)
   agent = GridAgent(config.grid_size * config.grid_size, config.hidden_size).to(config.device)
   optimizer = torch.optim.Adam(agent.parameters(), lr=config.lr)
@@ -54,27 +54,14 @@ def train(config):
         break
 
     replay.commit()
+    if episode_counter % 10 == 0:
+      replay.compile(lambda x, y: np.inf, key=lambda s, *_: hash(s.tobytes()))
 
     # Train the agent
-    if replay.num_steps() > config.batch_size:
+    if len(replay) > config.batch_size:
       for _ in range(config.num_train_steps):
-        # states, goals, actions, next_states, finished, pos, goal_pos, mask = (x.squeeze(1) for x in replay.sample(config.batch_size))
-        states, goals, actions, next_states, finished, pos, goal_pos, mask = replay.sample(config.batch_size, config.max_episode_length)
-        use_alt_goals = np.random.uniform(size=config.batch_size) < config.goal_replacement_prob
-        alt_goal_idxs = np.random.randint(0, np.sum(mask, axis=-1))
-        goals = np.where(use_alt_goals[:,None,None], states[np.arange(len(states)), alt_goal_idxs], goals[:,0])
-        goal_pos = np.where(use_alt_goals[:,None], pos[np.arange(len(pos)), alt_goal_idxs], goal_pos[:,0])
-        finished = np.where(use_alt_goals, np.all(pos[:,0] == goal_pos, axis=-1), finished[:,0])
-        states, actions, next_states, pos = (x[:,0] for x in (states, actions, next_states, pos))
-
-        # with torch.no_grad():
-        #   best_future_distances = torch.clip(agent(next_states, goals).cpu().min(dim=-1).values * ~torch.as_tensor(finished), 0, config.max_episode_length)
-        # distances = agent(states, goals)[torch.arange(len(actions)), actions]
-        # loss = F.smooth_l1_loss(distances, best_future_distances.to(config.device) + 1)
-        # loss.backwards()
-
+        states, goals, actions, targets = replay.sample(config.batch_size)
         distances = agent(states, goals)[torch.arange(len(actions)), actions]
-        targets = np.sum(np.abs(pos - goal_pos), axis=-1)
         loss = F.smooth_l1_loss(distances, torch.as_tensor(targets))
         loss.backward()
 
