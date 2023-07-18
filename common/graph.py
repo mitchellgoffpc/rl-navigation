@@ -41,10 +41,11 @@ class ReplayGraph:
     # Create a list of nodes and edges
     self.nodes, self.edges = {}, {}
     for episode in self.episodes:
-      states, actions, *_ = episode
-      for i in range(len(states) - 1):
+      states, _, actions, *_ = episode
+      for i in range(len(states)):
         self.nodes[key(states[i])] = states[i]
-        self.edges[(key(states[i]), key(states[i+1]))] = (states[i], states[i+1], actions)
+      for i in range(len(states)-1):
+        self.edges[(key(states[i]), key(states[i+1]))] = (states[i], states[i+1], actions[i])
 
     size = len(self.nodes)
     states = list(self.nodes.values())
@@ -63,6 +64,7 @@ class ReplayGraph:
       distances = dist(states[i], batch)
       self.weights[i,indices] = distances
 
+    # Floyd-Warshall to compute distances between edges
     self.distances = self.weights.copy()
     for k in range(size):
       for i in range(size):
@@ -75,18 +77,21 @@ class ReplayGraph:
     node_indices = {k:i for i,k in enumerate(self.nodes.keys())}
 
     edge_idxs = np.random.randint(0, len(edges), size=bs)
-    goal_idxs = np.random.randint(0, len(edges), size=bs)
+    goal_idxs = np.random.randint(0, len(nodes), size=bs)
     batch_edge_keys = [edge_keys[i] for i in edge_idxs]
     batch_goal_keys = [node_keys[i] for i in goal_idxs]
     batch_edges = [edges[i] for i in edge_idxs]
     batch_goals = [nodes[i] for i in goal_idxs]
+
     states = np.array([s for s, _, _ in batch_edges])
     actions = np.array([a for _, _, a in batch_edges])
+    goals = np.array(batch_goals)
     targets = np.array([
       self.distances[node_indices[sk], node_indices[nsk]] + \
       self.distances[node_indices[nsk], node_indices[gk]]
       for (sk, nsk), gk
       in zip(batch_edge_keys, batch_goal_keys)])
+
     return states, goals, actions, targets
 
 

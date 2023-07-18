@@ -58,11 +58,11 @@ def train(config):
       replay.compile(lambda x, y: np.inf, key=lambda s, *_: hash(s.tobytes()))
 
     # Train the agent
-    if len(replay) > config.batch_size:
+    if len(replay):
       for _ in range(config.num_train_steps):
         states, goals, actions, targets = replay.sample(config.batch_size)
         distances = agent(states, goals)[torch.arange(len(actions)), actions]
-        loss = F.smooth_l1_loss(distances, torch.as_tensor(targets))
+        loss = F.smooth_l1_loss(distances, torch.clip(torch.as_tensor(targets), 0, config.max_episode_length))
         loss.backward()
 
         optimizer.step()
