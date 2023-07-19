@@ -16,7 +16,7 @@ class GridConfig(BaseTrainingConfig):
   grid_size: int = 4
   batch_size: int = 512
   hidden_size: int = 128
-  num_episodes: int = 10000
+  num_episodes: int = 1000
   max_episode_length: int = 8
   replay_buffer_size: int = 1000
   goal_replacement_prob: float = 0.5
@@ -58,7 +58,7 @@ def train(config):
       replay.compile(lambda x, y: np.inf, key=lambda s, *_: hash(s.tobytes()))
 
     # Train the agent
-    if len(replay):
+    if len(replay.episodes) > 50:
       for _ in range(config.num_train_steps):
         states, goals, actions, targets = replay.sample(config.batch_size)
         distances = agent(states, goals)[torch.arange(len(actions)), actions]
