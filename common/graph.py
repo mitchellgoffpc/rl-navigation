@@ -33,7 +33,7 @@ class ReplayGraph:
     assert len(self.episode) > 0, "Can't commit an empty episode!"
     columns = []
     for i in range(len(self.episode[0])):
-      columns.append(np.stack([step[i] for step in self.episode], axis=0))
+      columns.append([step[i] for step in self.episode])
     self.add_episode(*columns)
     self.episode = []
 
@@ -60,8 +60,9 @@ class ReplayGraph:
     # Evaluate the model to fill in the rest of the edges
     for i in range(size):
       indices = np.where(self.weights[i] == np.inf)[0]
-      batch = np.stack([states[i] for i in indices], axis=0)
-      distances = dist(states[i], batch)
+      batch_states = np.repeat(states[i][None], len(indices), axis=0)
+      batch_goals = np.stack([states[j] for j in indices], axis=0)
+      distances = dist(batch_states, batch_goals)
       self.weights[i,indices] = distances
 
     # Floyd-Warshall to compute distances between edges
@@ -69,6 +70,7 @@ class ReplayGraph:
     for k in range(size):
       for i in range(size):
         self.distances[i] = np.minimum(self.distances[i], self.distances[i,k] + self.distances[k])
+
 
   def sample(self, bs:int) -> Tuple[np.ndarray, ...]:
     assert self.distances is not None, "You must call graph.compile() before you can sample from it"
