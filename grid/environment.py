@@ -32,3 +32,8 @@ class GridEnvironment:
 
     self.grid[tuple(self.pos)] = 1
     return self.grid.copy(), 0, self.pos == self.goal_pos, {'pos': self.pos[:], 'goal_pos': self.goal_pos[:]}
+
+  def get_state(self, position):
+    data = np.zeros((4, 4), dtype=bool)
+    data[position] = 1
+    return data
