@@ -1,4 +1,6 @@
 import time
+import random
+import itertools
 import numpy as np
 import torch
 import torch.nn.functional as F
@@ -23,12 +25,12 @@ class GridConfig(BaseTrainingConfig):
   goal_replacement_prob: float = 0.5
   num_train_steps: int = 4
   report_interval: int = 100
+  plot_interval: int = 0
   device_name: str = 'cpu'
 
 
 def train(config):
-  metric_types = {"Wins": MetricType.SUM, "Episode Length": MetricType.MEAN, "Epsilon": MetricType.MEAN}
-  metrics = Metrics(config.report_interval, metric_types)
+  metrics = Metrics({"Wins": MetricType.SUM, "Episode Length": MetricType.MEAN, "Epsilon": MetricType.MEAN})
   graph = ReplayGraph(config.replay_buffer_size)
   replay = ReplayBuffer(config.replay_buffer_size)
   env = GridEnvironment(config.grid_size, config.grid_size)
@@ -61,28 +63,6 @@ def train(config):
     if episode_counter % 10 == 0:
       graph.compile(lambda x, y: np.inf, key=lambda s: hash(s.tobytes()))
 
-    """
-    # test
-    import itertools, random
-    if episode_counter % 100 == 0:
-      def get_state(position):
-        data = np.zeros((4, 4), dtype=bool)
-        data[position] = 1
-        return data
-
-      preds = [[] for i in range(7)]
-      for i in range(100):
-        start_pos, goal_pos = random.choices(list(itertools.product(range(4), range(4))), k=2)
-        start, goal = get_state(start_pos), get_state(goal_pos)
-        true_dist = abs(start_pos[0]-goal_pos[0]) + abs(start_pos[1]-goal_pos[1])
-        model_dist = agent(start[None], goal[None]).detach().numpy()
-        preds[true_dist].append(model_dist.min())
-
-      import matplotlib.pyplot as plt
-      plt.plot([np.mean(x) for x in preds])
-      plt.show()
-    """
-
     # Train the agent
     if replay.num_steps() > config.batch_size:
       for _ in range(config.num_train_steps):
@@ -98,7 +78,23 @@ def train(config):
         optimizer.step()
         optimizer.zero_grad()
 
+    # Report metrics
     metrics.add({"Wins": done, "Episode Length": step, "Epsilon": epsilon})
+
+    if episode_counter % config.report_interval == 0:
+      metrics.report(episode_counter)
+    if config.plot_interval > 0 and episode_counter % config.plot_interval == 0:
+      preds = [[] for i in range(7)]
+      for i in range(100):
+        start_pos, goal_pos = random.choices(list(itertools.product(range(4), range(4))), k=2)
+        start, goal = env.get_state(start_pos), env.get_state(goal_pos)
+        true_dist = abs(start_pos[0]-goal_pos[0]) + abs(start_pos[1]-goal_pos[1])
+        model_dist = agent(start[None], goal[None]).detach().numpy()
+        preds[true_dist].append(model_dist.min())
+
+      import matplotlib.pyplot as plt
+      plt.plot([np.mean(x) for x in preds])
+      plt.show()
 
 
 # ENTRY POINT

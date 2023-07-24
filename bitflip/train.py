@@ -28,8 +28,7 @@ class BitflipConfig(BaseTrainingConfig):
 
 
 def train(config):
-  metric_types = {"Wins": MetricType.SUM, "Episode Length": MetricType.MEAN, "Epsilon": MetricType.MEAN}
-  metrics = Metrics(config.report_interval, metric_types)
+  metrics = Metrics({"Wins": MetricType.SUM, "Episode Length": MetricType.MEAN, "Epsilon": MetricType.MEAN})
   replay = ReplayBuffer(config.replay_buffer_size)
   env = BitflipEnvironment(config.bit_length)
   agent = BitflipAgent(config.hidden_size, config.bit_length).to(config.device)
@@ -76,7 +75,10 @@ def train(config):
         optimizer.step()
         optimizer.zero_grad()
 
+    # Report metrics
     metrics.add({"Wins": done, "Episode Length": step+1, "Epsilon": epsilon})
+    if episode_counter % config.report_interval == 0:
+      metrics.report(episode_counter)
 
 
 # ENTRY POINT
