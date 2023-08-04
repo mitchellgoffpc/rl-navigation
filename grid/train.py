@@ -37,6 +37,10 @@ def train(config):
   agent = GridAgent(config.grid_size * config.grid_size, config.hidden_size).to(config.device)
   optimizer = torch.optim.Adam(agent.parameters(), lr=config.lr)
 
+  dist_fn = lambda x, y: np.min(agent(x, y).detach().cpu().numpy())
+  act_fn = lambda x, y: np.argmin(agent(x, y).detach().cpu().numpy())
+  # act_fn = lambda x, y: torch.multinomial(F.softmax(torch.exp(-agent(x, y))), 1).cpu().numpy()
+
   for episode_counter in range(1, config.num_episodes + 1):
     epsilon = max(0.00, 1. - 2 * float(episode_counter) / config.num_episodes)
 
@@ -44,10 +48,8 @@ def train(config):
     state, goal = env.reset()
     for step in range(1, config.max_episode_length + 1):
       # Epsilon-greedy exploration strategy
-      if np.random.uniform() > epsilon:
-        with torch.no_grad():
-          distances = agent(state[None], goal[None]).cpu()
-          action = torch.argmin(distances).numpy()
+      if np.random.uniform() > epsilon and graph.distances is not None:
+        action = graph.search(state, goal, dist_fn, act_fn)
       else:
         action = np.random.randint(0, NUM_ACTIONS)
 
@@ -61,7 +63,7 @@ def train(config):
     replay.commit()
     graph.commit()
     if episode_counter % 10 == 0:
-      graph.compile(lambda x, y: np.inf, key=lambda s: hash(s.tobytes()))
+      graph.compile(dist_fn, key=lambda s: hash(s.tobytes()))
 
     # Train the agent
     if replay.num_steps() > config.batch_size:

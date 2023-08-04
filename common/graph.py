@@ -3,6 +3,8 @@ from typing import List, Tuple, Optional, Callable
 
 KeyFunction = Callable[[Tuple[np.ndarray]], int]
 DistanceFunction = Callable[[np.ndarray, np.ndarray], np.ndarray]
+ActionFunction = Callable[[np.ndarray, np.ndarray], np.ndarray]
+Action = int
 
 class ReplayGraph:
   size: int
@@ -71,6 +73,30 @@ class ReplayGraph:
       for i in range(size):
         self.distances[i] = np.minimum(self.distances[i], self.distances[i,k] + self.distances[k])
 
+  def search(self, state:np.ndarray, goal:np.ndarray, dist:DistanceFunction, act:ActionFunction) -> Action:
+    size = len(self.distances)
+    distances = np.full((size, size), np.inf, dtype=np.float32)
+    distances[:size,:size] = self.distances
+
+    # Fill in the distances from each node to the goal (with Floyd-Warshall update)
+    batch_states = np.repeat(state[None], size, axis=0)
+    batch_goals = np.stack(list(self.nodes.values()), axis=0)
+    distances[-1] = dist(batch_states, batch_goals)
+
+    for k in range(size):
+      for i in range(size):
+        distances[i,-1] = min(distances[i,-1], distances[i,k] + distances[k,-1])
+
+    # Fill in the distances from the state to each node
+    batch_states = np.stack(list(self.nodes.values()), axis=0)
+    batch_goals = np.repeat(goal[None], size, axis=0)
+    distances[:,-1] = dist(batch_states, batch_goals)
+    distances[-1,-1] = np.inf
+
+    # Pick the best intermediate goal and select an action
+    node_idx = np.argmin(distances[-1] + distances[:,-1])
+    action = act(state[None], list(self.nodes.values())[node_idx][None]).squeeze()
+    return act(state[None], goal[None])
 
   def sample(self, bs:int) -> Tuple[np.ndarray, ...]:
     assert self.distances is not None, "You must call graph.compile() before you can sample from it"
