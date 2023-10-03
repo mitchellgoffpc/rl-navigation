@@ -1,2 +1,4 @@
 .DS_Store
 *.nes
+zelda/datasets/random/data/
+zelda/datasets/expert/data/
