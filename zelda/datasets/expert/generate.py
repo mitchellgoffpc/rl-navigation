@@ -27,12 +27,7 @@ if __name__ == '__main__':
 
     # Generate episodes
     for i in range(start_idx + 1, NUM_EPISODES):
-        frames = []
-        actions = []
-        map_pos = []
-        screen_pos = []
         step = 0
-
         obs, info = env.reset()
         while step < NUM_STEPS:
             clock.tick(60)  # Delay to achieve 60 fps
@@ -46,13 +41,9 @@ if __name__ == '__main__':
             for key, action in KEYS_TO_ACTIONS.items():
                 if keys[key]:
                     obs, info = env.step(action)
-                    frames.append(obs)
-                    actions.append(action)
-                    map_pos.append(info['pos'][:2])
-                    screen_pos.append(info['pos'][2:])
+                    fn = data_dir / f'episode_{i}_step_{step}.npz'
+                    np.savez_compressed(fn, frame=obs, action=action, map_pos=info['map_pos'], screen_pos=info['screen_pos'])
                     step += 1
 
             screen.blit(pygame.surfarray.make_surface(obs.swapaxes(0, 1)), (0, 0))
             pygame.display.flip()
-
-        np.savez_compressed(data_dir / f'episode_{i}.npz', frames=frames, actions=actions, map_pos=map_pos, screen_pos=screen_pos)

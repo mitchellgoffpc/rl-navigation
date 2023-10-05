@@ -21,9 +21,7 @@ class ZeldaEnvironment(NESEnvironment):
 
   def step(self, *args, **kwargs):
     obs = super().step(*args, **kwargs)
-    pos_x, pos_y = self.screen_pos
-    map_x, map_y = self.map_pos
-    info = {'pos': (pos_x, pos_y, map_x, map_y)}
+    info = {'screen_pos': self.screen_pos, 'map_pos': self.map_pos}
     return obs, info
 
   def pos_matches(self, a, b):
