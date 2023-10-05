@@ -5,11 +5,11 @@ from tqdm import tqdm, trange
 from zelda.models import ZeldaAgent
 from zelda.datasets import RLDataset
 
-NUM_EPOCHS = 1000
+NUM_EPOCHS = 20
 BATCH_SIZE = 32
 
 def train():
-    device = torch.device('mps')
+    device = torch.device('cuda')
     model = ZeldaAgent().to(device)
     optimizer = torch.optim.Adam(model.parameters())
 

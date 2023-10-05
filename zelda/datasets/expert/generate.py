@@ -8,8 +8,8 @@ NUM_EPISODES  = 20
 NUM_STEPS = 500
 KEYS_TO_ACTIONS = {
     pygame.K_w: ZeldaEnvironment.UP,
-    pygame.K_a: ZeldaEnvironment.LEFT,
     pygame.K_s: ZeldaEnvironment.DOWN,
+    pygame.K_a: ZeldaEnvironment.LEFT,
     pygame.K_d: ZeldaEnvironment.RIGHT}
 
 
@@ -38,9 +38,9 @@ if __name__ == '__main__':
                     sys.exit()
 
             keys = pygame.key.get_pressed()
-            for key, action in KEYS_TO_ACTIONS.items():
+            for action, key in enumerate(KEYS_TO_ACTIONS.keys()):
                 if keys[key]:
-                    obs, info = env.step(action)
+                    obs, info = env.step(KEYS_TO_ACTIONS[key])
                     fn = data_dir / f'episode_{i}_step_{step}.npz'
                     np.savez_compressed(fn, frame=obs, action=action, map_pos=info['map_pos'], screen_pos=info['screen_pos'])
                     step += 1
