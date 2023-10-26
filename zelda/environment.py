@@ -25,18 +25,15 @@ class ZeldaEnvironment(NESEnvironment):
     return obs, info
 
   def pos_matches(self, a, b):
-    ax, ay, amx, amy = map(int, a)
-    bx, by, bmx, bmy = map(int, b)
-    return abs(ax - bx) <= 4 and abs(ay - by) <= 4 and (amx, amy) == (bmx, bmy)
-
-  @property
-  def memory(self):
-    return self.ram
+    ax, ay, amx, amy, aml = map(int, a)
+    bx, by, bmx, bmy, bml = map(int, b)
+    return abs(ax - bx) <= 4 and abs(ay - by) <= 4 and (amx, amy, aml) == (bmx, bmy, bml)
 
   @property
   def screen_pos(self):
-    return self.memory[0x70], self.memory[0x84]
+    return self.ram[0x70], self.ram[0x84]
 
   @property
   def map_pos(self):
-    return self.memory[0xEB] % 0x10, self.memory[0xEB] // 0x10
+    # NOTE: 0x0609 is the song type, this is the only way I can find to reliably determine which map level you're on.
+    return self.ram[0xEB] % 0x10, self.ram[0xEB] // 0x10, int(self.ram[0x0609] != 1)

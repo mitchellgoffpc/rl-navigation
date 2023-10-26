@@ -5,24 +5,27 @@ from pathlib import Path
 
 
 class ZeldaDataset(Dataset):
-    def __init__(self, data_type='expert', max_distance=None):
+    def __init__(self, data_type='expert', subsample=1, max_episode_len=None, max_goal_dist=None):
         assert data_type in ['expert', 'random'], 'data type should be either expert or random'
         self.data_dir = Path(__file__).parent / data_type / 'data'
-        self.episode_length = sum(1 for f in self.data_dir.iterdir() if f.name.startswith('episode_0_')) - 1
-        self.num_episodes = sum(1 for x in self.data_dir.iterdir()) // (self.episode_length + 1)
-        self.max_distance = max_distance or self.episode_length
+        self.episode_len = sum(1 for f in self.data_dir.iterdir() if f.name.startswith('episode_0_')) - 1
+        self.num_episodes = sum(1 for x in self.data_dir.iterdir()) // (self.episode_len + 1)
+        self.max_goal_dist = max_goal_dist or self.episode_len
+        self.subsample = subsample
+        if max_episode_len:
+            self.episode_len = min(self.episode_len, max_episode_len)
 
     def __len__(self):
-        return self.num_episodes * self.episode_length
+        return int(self.num_episodes * self.episode_len * self.subsample)
 
     def get_step_idx(self, idx):
-        episode_idx = idx // self.episode_length
-        frame_idx = idx % self.episode_length
-        return episode_idx, frame_idx
+        episode_idx = idx // self.episode_len
+        step_idx = idx % self.episode_len
+        return episode_idx, step_idx
 
-    def get_goal_idx(self, frame_idx):
-        max_index = min(self.episode_length + 1, frame_idx + self.max_distance)
-        return np.random.randint(frame_idx + 1, max_index)
+    def get_goal_idx(self, step_idx):
+        max_index = min(self.episode_len + 1, step_idx + self.max_goal_dist + 1)
+        return np.random.randint(step_idx + 1, max_index)
 
     def get_step_data(self, episode_idx, step_idx):
         step = np.load(self.data_dir / f'episode_{episode_idx}_step_{step_idx}.npz')
@@ -55,32 +58,35 @@ class RLDataset(ZeldaDataset):
 class ValidationDataset(ZeldaDataset):
     def __init__(self):
         super().__init__('expert')
-        initial_map_pos = np.load(self.data_dir / f'episode_0_step_0.npz')['map_pos']
+        initial_map_pos = tuple(np.load(self.data_dir / f'episode_0_step_0.npz')['map_pos'])
 
-        self.episode_lengths = []
+        self.episode_lens = []
         for episode_idx in range(self.num_episodes):
-            steps = (np.load(self.data_dir / f'episode_{episode_idx}_step_{i}.npz') for i in range(self.episode_length))
-            self.episode_lengths.append(next(i for i, step in enumerate(steps) if step['map_pos'] != initial_map_pos))
-        self.cum_episode_lengths = np.cumsum([0] + self.episode_lengths)
+            map_positions = [tuple(np.load(self.data_dir / f'episode_{episode_idx}_step_{i}.npz')['map_pos']) for i in range(self.episode_len)]
+            self.episode_lens.append(next((i for i, map_pos in enumerate(map_positions) if map_pos != initial_map_pos), 0))
+        self.cum_episode_lens = np.cumsum([0] + self.episode_lens)
 
     def __len__(self):
-        return sum(self.episode_lengths)
+        return sum(self.episode_lens)
 
     def __getitem__(self, idx):
-        episode_idx, frame_idx = self.get_step_idx(idx)
+        episode_idx, step_idx = self.get_step_idx(idx)
         goal_step_idx = self.get_goal_idx(episode_idx, step_idx)
 
-        state, action, map_pos, screen_pos = self.get_step_data(episode_idx, step_idx)
-        goal_state, *_ = self.get_step_data(episode_idx, goal_step_idx)
+        state, _, map_pos, screen_pos = self.get_step_data(episode_idx, step_idx)
+        goal_state, _, goal_map_pos, _ = self.get_step_data(episode_idx, goal_step_idx)
+        action = {(7, 6, 0): 0, (6, 7, 0): 2, (8, 7, 0): 3}[tuple(goal_map_pos.numpy())]
         return state, goal_state, action, {'distance': goal_step_idx - step_idx, 'map_pos': map_pos, 'screen_pos': screen_pos}
 
     def get_step_idx(self, idx):
-        episode_idx = np.searchsorted(self.cum_episode_lengths, idx, side='right') - 1
-        frame_idx = idx - self.cum_episode_lengths[episode_idx]
-        return episode_idx, frame_idx
+        episode_idx = np.searchsorted(self.cum_episode_lens, idx, side='right') - 1
+        step_idx = idx - self.cum_episode_lens[episode_idx]
+        return episode_idx, step_idx
 
-    def get_goal_idx(self, episode_idx, frame_idx):
-        return np.random.randint(frame_idx + 1, self.episode_lengths[episode_idx])
+    def get_goal_idx(self, episode_idx, step_idx):
+        max_index = min(self.episode_lens[episode_idx] + 1, step_idx + self.max_goal_dist + 1)
+        return np.random.randint(step_idx + 1, max_index)
+        # return self.episode_lens[episode_idx]
 
 
 if __name__ == '__main__':
@@ -89,15 +95,27 @@ if __name__ == '__main__':
     import matplotlib.pyplot as plt
     from tqdm import tqdm, trange
     from itertools import islice
+    from collections import Counter
     from torch.utils.data import DataLoader
 
     parser = argparse.ArgumentParser()
-    parser.add_argument('command', nargs='?', default='visualize', choices=['visualize', 'benchmark'])
+    parser.add_argument('command', nargs='?', default='visualize', choices=['inspect', 'visualize', 'benchmark'])
     args = parser.parse_args()
 
     # Visualize data
-    if args.command == 'visualize':
-        dataset = ImitationDataset('random')
+    if args.command == 'inspect':
+        map_positions = []
+        dataset = ImitationDataset('expert')
+        for i in trange(len(dataset), desc="inspecting dataset"):
+            *_, info = dataset[i]
+            map_positions.append(tuple(info['map_pos'].tolist()))
+        print("ROOM COUNT:")
+        for pos, count in Counter(map_positions).items():
+            print(f"{pos}: {count}")
+
+    elif args.command == 'visualize':
+        # dataset = ImitationDataset('random')
+        dataset = ValidationDataset()
         for i in range(5):
             image, goal_state, action, info = random.choice(dataset)
             fig, ax = plt.subplots(1, 2, figsize=(10, 5))

@@ -50,8 +50,9 @@ if __name__ == '__main__':
 
   env = ZeldaEnvironment()
   frame, _ = env.reset()
-  goal_pos = (120, 120, 7, 7)
+  goal_pos = (120, 120, 7, 7, 0)
   screen_h, screen_w = frame.shape[0] * 2, frame.shape[1] * 2
+  footer_h = screen_h // 12
 
   pygame.init()
   screen = pygame.display.set_mode((screen_w, screen_h))
@@ -75,11 +76,13 @@ if __name__ == '__main__':
     else:
       frame, info, running = step_from_keyboard(env)
 
-    pos_x, pos_y, map_x, map_y = info['pos']
-    footer = np.zeros((screen_h // 8, screen_w, 3), dtype=np.uint8)
+    pos_x, pos_y = info['screen_pos']
+    map_x, map_y, map_l = info['map_pos']
+    current_pos = (pos_x, pos_y, map_x, map_y, map_l)
+    footer = np.zeros((footer_h, screen_w, 3), dtype=np.uint8)
     frame = cv2.resize(frame, (screen_w, screen_h))
-    footer_msg = f'POS: X={pos_x}, Y={pos_y} | MAP: X={map_x}, Y={map_y} | DONE: {env.pos_matches(info["pos"], goal_pos)}'
-    cv2.putText(footer, footer_msg, (10,screen_h//8-15), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255))
+    footer_msg = f'POS: X={pos_x}, Y={pos_y} | MAP: X={map_x}, Y={map_y}, L={map_l} | DONE: {env.pos_matches(current_pos, goal_pos)}'
+    cv2.putText(footer, footer_msg, (10, footer_h-15), cv2.FONT_HERSHEY_SIMPLEX, 0.52, (255, 255, 255))
     frame = np.concatenate([frame, footer], axis=0)
     draw(frame)
     time.sleep(0.01)
