@@ -114,8 +114,8 @@ if __name__ == '__main__':
             print(f"{pos}: {count}")
 
     elif args.command == 'visualize':
-        # dataset = ImitationDataset('random')
-        dataset = ValidationDataset()
+        dataset = ImitationDataset('random', max_goal_dist=1)
+        # dataset = ValidationDataset()
         for i in range(5):
             image, goal_state, action, info = random.choice(dataset)
             fig, ax = plt.subplots(1, 2, figsize=(10, 5))
