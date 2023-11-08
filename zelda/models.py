@@ -4,17 +4,16 @@ import torch.nn.functional as F
 import torchvision
 
 INPUT_SIZE = (240, 256, 3)
-NUM_ACTIONS = 4
 
 class ZeldaAgent(nn.Module):
-  def __init__(self):
+  def __init__(self, output_size):
     super().__init__()
     resnet = torchvision.models.resnet18(weights=torchvision.models.ResNet18_Weights.DEFAULT)
     self.backbone = torch.nn.Sequential(*list(resnet.children())[1:-2])
     self.conv1 = nn.Conv2d(6, 64, kernel_size=7, stride=2, padding=3, bias=False)
     self.conv2 = nn.Conv2d(512, 16, kernel_size=1, bias=False)
     self.fc1 = nn.Linear(16*8*8, 128)
-    self.fc2 = nn.Linear(128, NUM_ACTIONS)
+    self.fc2 = nn.Linear(128, output_size)
 
   def forward(self, state, goal):
     b,h,w,c = state.shape
