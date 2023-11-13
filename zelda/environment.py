@@ -31,9 +31,9 @@ class ZeldaEnvironment(NESEnvironment):
 
   @property
   def screen_pos(self):
-    return self.ram[0x70], self.ram[0x84]
+    return int(self.ram[0x70]), int(self.ram[0x84])  # uint8 break subtraction
 
   @property
   def map_pos(self):
     # NOTE: 0x0609 is the song type, this is the only way I can find to reliably determine which map level you're on.
-    return self.ram[0xEB] % 0x10, self.ram[0xEB] // 0x10, int(self.ram[0x0609] != 1)
+    return int(self.ram[0xEB] % 0x10), int(self.ram[0xEB] // 0x10), int(self.ram[0x0609] != 1)
