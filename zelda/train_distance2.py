@@ -1,3 +1,4 @@
+import random
 import numpy as np
 import matplotlib.pyplot as plt
 import torch
@@ -70,14 +71,25 @@ def get_true_actions(info):
 # GENERATE DATA
 
 env = ZeldaEnvironment()
-train_edges, test_edges = [], []
 
-for _ in trange(NUM_EPISODES, desc='generating train episodes'):
+train_edges, test_edges = [], []
+for _ in trange(NUM_EPISODES * 4, desc='generating train episodes'):
     train_edges.extend(generate_episode(env))
 for _ in trange(NUM_EPISODES, desc='generating test episodes'):
     test_edges.extend(generate_episode(env))
 
-import random
+# filter train data
+def get_edge_score(info):
+  info_torch = {k: [torch.tensor(x)[None] for x in v]  for k,v in info.items() if k != 'distance'}
+  true_distance = get_true_distance(info_torch).squeeze().item()
+  return info['distance'] / max(1, true_distance)
+
+random.shuffle(train_edges)
+edge_scores = [get_edge_score(info) for *_, info in train_edges]
+best_edge_idxs = np.argsort(edge_scores)[:len(train_edges) // 4]
+train_edges = [train_edges[i] for i in best_edge_idxs]
+
+# subsample test data
 random.shuffle(test_edges)
 test_edges = test_edges[:len(test_edges) // 10]
 
@@ -127,7 +139,7 @@ for epoch in range(NUM_EPOCHS):
 
         dist_err.append(F.mse_loss(distance_preds[:,0], distance).item())
         true_actions = get_true_actions(info)
-        policy_acc.append(((action_preds.softmax(-1).cpu() * true_actions).sum(-1) / true_actions.sum(-1)).mean().item())
+        policy_acc.append((action_preds.softmax(-1).cpu() * true_actions).sum(-1).mean().item())
         true_dist.extend(get_true_distance(info).cpu().numpy().tolist())
         pred_dist.extend(distance_preds[:,0].cpu().detach().numpy().tolist())
         pbar.set_description(f"[TRAIN] Epoch {epoch+1}/{NUM_EPOCHS} | Distance MSE: {np.mean(dist_err):.2f} | Policy Accuracy: {np.mean(policy_acc):.3f}")
@@ -156,7 +168,7 @@ for epoch in range(NUM_EPOCHS):
 
         dist_err.append(F.mse_loss(distance_preds[:,0], distance).item())
         true_actions = get_true_actions(info)
-        policy_acc.append(((action_preds.softmax(-1).cpu() * true_actions).sum(-1) / true_actions.sum(-1)).mean().item())
+        policy_acc.append((action_preds.softmax(-1).cpu() * true_actions).sum(-1).mean().item())
         true_dist.extend(get_true_distance(info).cpu().numpy().tolist())
         pred_dist.extend(distance_preds[:,0].cpu().detach().numpy().tolist())
         pbar.set_description(f"[TEST]  Epoch {epoch+1}/{NUM_EPOCHS} | Distance MSE: {np.mean(dist_err):.2f} | Policy Accuracy: {np.mean(policy_acc):.3f}")
