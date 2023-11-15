@@ -12,7 +12,7 @@ from zelda.environment import ZeldaEnvironment
 NUM_EPISODES = 20
 NUM_STEPS = 20
 NUM_REPEATS = 8
-NUM_EPOCHS = 10
+NUM_EPOCHS = 1
 BATCH_SIZE = 32
 LEARNING_RATE = 3e-4
 
@@ -70,113 +70,141 @@ def get_true_actions(info):
 
 # GENERATE DATA
 
-env = ZeldaEnvironment()
+def get_train_and_test_data():
+    env = ZeldaEnvironment()
 
-train_edges, test_edges = [], []
-for _ in trange(NUM_EPISODES * 4, desc='generating train episodes'):
-    train_edges.extend(generate_episode(env))
-for _ in trange(NUM_EPISODES, desc='generating test episodes'):
-    test_edges.extend(generate_episode(env))
+    train_edges, test_edges = [], []
+    for _ in trange(NUM_EPISODES * 2, desc='generating train episodes'):
+        train_edges.extend(generate_episode(env))
+    for _ in trange(NUM_EPISODES, desc='generating test episodes'):
+        test_edges.extend(generate_episode(env))
 
-# filter train data
-def get_edge_score(info):
-  info_torch = {k: [torch.tensor(x)[None] for x in v]  for k,v in info.items() if k != 'distance'}
-  true_distance = get_true_distance(info_torch).squeeze().item()
-  return info['distance'] / max(1, true_distance)
+    # # filter train data
+    # def get_edge_score(info):
+    #   info_torch = {k: [torch.tensor(x)[None] for x in v]  for k,v in info.items() if k != 'distance'}
+    #   true_distance = get_true_distance(info_torch).squeeze().item()
+    #   return info['distance'] / max(1, true_distance)
+    #
+    # random.shuffle(train_edges)
+    # edge_scores = [get_edge_score(info) for *_, info in train_edges]
+    # best_edge_idxs = np.argsort(edge_scores)[:len(train_edges) // 4]
+    # train_edges = [train_edges[i] for i in best_edge_idxs]
 
-random.shuffle(train_edges)
-edge_scores = [get_edge_score(info) for *_, info in train_edges]
-best_edge_idxs = np.argsort(edge_scores)[:len(train_edges) // 4]
-train_edges = [train_edges[i] for i in best_edge_idxs]
+    # subsample test data
+    random.shuffle(test_edges)
+    test_edges = test_edges[:len(test_edges) // 10]
 
-# subsample test data
-random.shuffle(test_edges)
-test_edges = test_edges[:len(test_edges) // 10]
+    print(f"Collected {len(train_edges)} train edges and {len(test_edges)} test edges")
 
-print(f"Collected {len(train_edges)} train edges and {len(test_edges)} test edges")
+    return train_edges, test_edges
 
 
 # TRAIN MODELS
 
-device = (
-    torch.device('cuda') if torch.cuda.is_available() else
-    torch.device('mps') if torch.backends.mps.is_available() else
-    torch.device('cpu'))
+def train_model(device, train_edges, test_edges):
+    distance_model = ZeldaAgent(2).to(device)
+    policy_model = ZeldaAgent(4).to(device)
+    distance_optim = torch.optim.Adam(distance_model.parameters(), lr=LEARNING_RATE)
+    policy_optim = torch.optim.Adam(policy_model.parameters(), lr=LEARNING_RATE)
 
-distance_model = ZeldaAgent(2).to(device)
-policy_model = ZeldaAgent(4).to(device)
-distance_optim = torch.optim.Adam(distance_model.parameters(), lr=LEARNING_RATE)
-policy_optim = torch.optim.Adam(policy_model.parameters(), lr=LEARNING_RATE)
+    train_dataset = EdgeDataset(train_edges)
+    test_dataset = EdgeDataset(test_edges)
+    train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True)
+    test_loader = DataLoader(test_dataset, batch_size=BATCH_SIZE)
 
-train_dataset = EdgeDataset(train_edges)
-test_dataset = EdgeDataset(test_edges)
-train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True)
-test_loader = DataLoader(test_dataset, batch_size=BATCH_SIZE)
+    for epoch in range(NUM_EPOCHS):
 
-for epoch in range(NUM_EPOCHS):
+        # TRAIN
 
-    # TRAIN
+        distance_model.train()
+        policy_model.train()
+        dist_err, policy_acc = [], []
+        true_dist, pred_dist = [], []
 
-    distance_model.train()
-    policy_model.train()
-    dist_err, policy_acc = [], []
-    true_dist, pred_dist = [], []
+        for state, goal_state, action, info in (pbar := tqdm(train_loader, leave=False)):
+            state, goal_state, action, distance = state.to(device), goal_state.to(device), action.to(device), info['distance'].float().to(device)
 
-    for state, goal_state, action, info in (pbar := tqdm(train_loader, leave=False)):
-        state, goal_state, action, distance = state.to(device), goal_state.to(device), action.to(device), info['distance'].float().to(device)
-
-        distance_optim.zero_grad()
-        distance_preds = distance_model(state, goal_state)
-        distance_loss = F.gaussian_nll_loss(distance_preds[:,0], distance, distance_preds[:,1].exp())
-        distance_loss.backward()
-        distance_optim.step()
-
-        policy_optim.zero_grad()
-        action_preds = policy_model(state, goal_state)
-        policy_loss = F.cross_entropy(action_preds, action)
-        policy_loss.backward()
-        policy_optim.step()
-
-        dist_err.append(F.mse_loss(distance_preds[:,0], distance).item())
-        true_actions = get_true_actions(info)
-        policy_acc.append((action_preds.softmax(-1).cpu() * true_actions).sum(-1).mean().item())
-        true_dist.extend(get_true_distance(info).cpu().numpy().tolist())
-        pred_dist.extend(distance_preds[:,0].cpu().detach().numpy().tolist())
-        pbar.set_description(f"[TRAIN] Epoch {epoch+1}/{NUM_EPOCHS} | Distance MSE: {np.mean(dist_err):.2f} | Policy Accuracy: {np.mean(policy_acc):.3f}")
-
-    print(f"[TRAIN] Epoch {epoch+1}/{NUM_EPOCHS} | Distance MSE: {np.mean(dist_err):.2f} | Policy Accuracy: {np.mean(policy_acc):.3f}")
-
-    plt.scatter(true_dist, pred_dist)
-    plt.xlabel('True Distance')
-    plt.ylabel('Predicted Distance')
-    plt.title('Training: True vs Predicted Distance')
-    plt.show()
-
-    # TEST
-
-    distance_model.eval()
-    policy_model.eval()
-    dist_err, policy_acc = [], []
-    true_dist, pred_dist = [], []
-
-    for state, goal_state, _, info in (pbar := tqdm(test_loader, leave=False)):
-        state, goal_state, distance = state.to(device), goal_state.to(device), info['distance'].float().to(device)
-        with torch.no_grad():
+            distance_optim.zero_grad()
             distance_preds = distance_model(state, goal_state)
+            distance_loss = F.gaussian_nll_loss(distance_preds[:,0], distance, distance_preds[:,1].exp())
+            distance_loss.backward()
+            distance_optim.step()
+
+            policy_optim.zero_grad()
             action_preds = policy_model(state, goal_state)
-        distance_loss = F.gaussian_nll_loss(distance_preds[:,0], distance, distance_preds[:,1].exp())
+            policy_loss = F.cross_entropy(action_preds, action)
+            policy_loss.backward()
+            policy_optim.step()
 
-        dist_err.append(F.mse_loss(distance_preds[:,0], distance).item())
-        true_actions = get_true_actions(info)
-        policy_acc.append((action_preds.softmax(-1).cpu() * true_actions).sum(-1).mean().item())
-        true_dist.extend(get_true_distance(info).cpu().numpy().tolist())
-        pred_dist.extend(distance_preds[:,0].cpu().detach().numpy().tolist())
-        pbar.set_description(f"[TEST]  Epoch {epoch+1}/{NUM_EPOCHS} | Distance MSE: {np.mean(dist_err):.2f} | Policy Accuracy: {np.mean(policy_acc):.3f}")
+            dist_err.append(F.mse_loss(distance_preds[:,0], distance).item())
+            true_actions = get_true_actions(info)
+            policy_acc.append((action_preds.softmax(-1).cpu() * true_actions).sum(-1).mean().item())
+            true_dist.extend(get_true_distance(info).cpu().numpy().tolist())
+            pred_dist.extend(distance_preds[:,0].cpu().detach().numpy().tolist())
+            pbar.set_description(f"[TRAIN] Epoch {epoch+1}/{NUM_EPOCHS} | Distance MSE: {np.mean(dist_err):.2f} | Policy Accuracy: {np.mean(policy_acc):.3f}")
 
-    print(f"[TEST]  Epoch {epoch+1}/{NUM_EPOCHS} | Distance MSE: {np.mean(dist_err):.2f} | Policy Accuracy: {np.mean(policy_acc):.3f}\n")
+        print(f"[TRAIN] Epoch {epoch+1}/{NUM_EPOCHS} | Distance MSE: {np.mean(dist_err):.2f} | Policy Accuracy: {np.mean(policy_acc):.3f}")
 
-    plt.scatter(true_dist, pred_dist)
-    plt.xlabel('True Distance')
-    plt.ylabel('Predicted Distance')
-    plt.title('Testing: True vs Predicted Distance')
-    plt.show()
+        # plt.scatter(true_dist, pred_dist)
+        # plt.xlabel('True Distance')
+        # plt.ylabel('Predicted Distance')
+        # plt.title('Training: True vs Predicted Distance')
+        # plt.show()
+
+        # TEST
+
+        distance_model.eval()
+        policy_model.eval()
+        dist_err, policy_acc = [], []
+        true_dist, pred_dist = [], []
+
+        for state, goal_state, _, info in (pbar := tqdm(test_loader, leave=False)):
+            state, goal_state, distance = state.to(device), goal_state.to(device), info['distance'].float().to(device)
+            with torch.no_grad():
+                distance_preds = distance_model(state, goal_state)
+                action_preds = policy_model(state, goal_state)
+            distance_loss = F.gaussian_nll_loss(distance_preds[:,0], distance, distance_preds[:,1].exp())
+
+            dist_err.append(F.mse_loss(distance_preds[:,0], distance).item())
+            true_actions = get_true_actions(info)
+            policy_acc.append((action_preds.softmax(-1).cpu() * true_actions).sum(-1).mean().item())
+            true_dist.extend(get_true_distance(info).cpu().numpy().tolist())
+            pred_dist.extend(distance_preds[:,0].cpu().detach().numpy().tolist())
+            pbar.set_description(f"[TEST]  Epoch {epoch+1}/{NUM_EPOCHS} | Distance MSE: {np.mean(dist_err):.2f} | Policy Accuracy: {np.mean(policy_acc):.3f}")
+
+        print(f"[TEST]  Epoch {epoch+1}/{NUM_EPOCHS} | Distance MSE: {np.mean(dist_err):.2f} | Policy Accuracy: {np.mean(policy_acc):.3f}\n")
+
+        # plt.scatter(true_dist, pred_dist)
+        # plt.xlabel('True Distance')
+        # plt.ylabel('Predicted Distance')
+        # plt.title('Testing: True vs Predicted Distance')
+        # plt.show()
+
+    return distance_model
+
+
+if __name__ == "__main__":
+    full_train_edges, test_edges = get_train_and_test_data()
+    train_edges = full_train_edges[:3800]
+
+    device = (
+        torch.device('cuda') if torch.cuda.is_available() else
+        torch.device('mps') if torch.backends.mps.is_available() else
+        torch.device('cpu'))
+
+    for i in range(3):
+        distance_model = train_model(device, train_edges, test_edges)
+
+        train_dataset = EdgeDataset(full_train_edges)
+        train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=False)
+
+        edge_scores = []
+        for state, goal_state, _, info in tqdm(train_loader):
+            with torch.no_grad():
+                distance_preds = distance_model(state.to(device), goal_state.to(device))
+            means, stds = distance_preds[:,0].cpu(), distance_preds[:,1].exp().cpu()
+            scores = (info['distance'] - means) / stds
+            edge_scores.extend(scores.numpy().tolist())
+
+        best_edge_idxs = np.argsort(edge_scores)[:len(full_train_edges) // 4]
+        train_edges = [full_train_edges[i] for i in best_edge_idxs[:3800]]
