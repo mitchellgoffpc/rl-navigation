@@ -31,7 +31,7 @@ def step_from_keyboard(env):
     frame, info = env.step(action)
   return frame, info, running
 
-def step_from_model(env, model, frame, goal):
+def step_from_model(env, policy, frame, goal):
   torch_frame = torch.as_tensor(frame[None]).permute(0,3,1,2).float()
   torch_goal = torch.as_tensor(goal[None]).permute(0,3,1,2).float()
   action_probs = agent(torch_frame, torch_goal)[0]
@@ -61,18 +61,18 @@ if __name__ == '__main__':
     pygame.surfarray.blit_array(screen, cv2.resize(image, (screen_w, screen_h)).swapaxes(0, 1))
     pygame.display.flip()
 
-  agent = None
+  policy = None
   if args.model:
     import torch
-    from zelda.train import Agent
-    agent = Agent(128).eval()
-    agent.load_state_dict(torch.load('checkpoint.pt'))
+    from zelda.models import ZeldaAgent
+    policy = ZeldaAgent(4).eval()
+    policy.load_state_dict(torch.load(Path(__file__).parent / 'checkpoints' / 'policy.ckpt'))
     torch.set_grad_enabled(False)
 
   running = True
   while running:
     if args.model:
-      frame, info, running = step_from_model(env, model, frame, goal)
+      frame, info, running = step_from_model(env, policy, frame, goal)
     else:
       frame, info, running = step_from_keyboard(env)
 

@@ -5,6 +5,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
+from pathlib import Path
 from tqdm import tqdm, trange
 from zelda.models import ZeldaAgent
 from zelda.environment import ZeldaEnvironment
@@ -26,30 +27,6 @@ class EdgeDataset(Dataset):
     def __getitem__(self, idx):
         return self.data[idx]
 
-def generate_episode(env):
-    episode = []
-    obs, info = env.reset()
-    actions = [env.UP, env.DOWN, env.LEFT, env.RIGHT]
-
-    for j in range(NUM_STEPS):
-        action = np.random.randint(len(actions))
-        episode.append((obs, action, info['map_pos'], info['screen_pos']))
-        for _ in range(NUM_REPEATS):
-            obs, info = env.step(actions[action])
-
-    edges = []
-    for i in range(len(episode)):
-        for j in range(i+1, len(episode)):
-            state, action, map_pos, screen_pos = episode[i]
-            goal_state, _, goal_map_pos, goal_screen_pos = episode[j]
-            info = {
-                'distance': j - i,
-                'map_pos': map_pos, 'screen_pos': screen_pos,
-                'goal_map_pos': goal_map_pos, 'goal_screen_pos': goal_screen_pos}
-            edges.append((state, goal_state, action, info))
-
-    return edges
-
 def get_true_distance(info):
     current_pos = torch.stack(info['screen_pos'], -1)
     goal_pos = torch.stack(info['goal_screen_pos'], -1)
@@ -70,25 +47,45 @@ def get_true_actions(info):
 
 # GENERATE DATA
 
-def get_train_and_test_data():
+def generate_episode(env, policy_model):
+    episode = []
+    obs, info = env.reset()
+    actions = [env.UP, env.DOWN, env.LEFT, env.RIGHT]
+
+    for j in range(NUM_STEPS):
+        if policy_model is not None:
+            with torch.no_grad():
+                torch_obs = torch.as_tensor(obs[None])
+                action_probs = policy_model(torch_obs, torch_obs * 0).softmax(-1)
+                action = torch.multinomial(action_probs, 1).cpu().numpy().item()
+        else:
+            action = np.random.randint(len(actions))
+
+        episode.append((obs, action, info['map_pos'], info['screen_pos']))
+        for _ in range(NUM_REPEATS):
+            obs, info = env.step(actions[action])
+
+    edges = []
+    for i in range(len(episode)):
+        for j in range(i+1, len(episode)):
+            state, action, map_pos, screen_pos = episode[i]
+            goal_state, _, goal_map_pos, goal_screen_pos = episode[j]
+            info = {
+                'distance': j - i,
+                'map_pos': map_pos, 'screen_pos': screen_pos,
+                'goal_map_pos': goal_map_pos, 'goal_screen_pos': goal_screen_pos}
+            edges.append((state, goal_state, action, info))
+
+    return edges
+
+def get_train_and_test_data(policy_model):
     env = ZeldaEnvironment()
 
     train_edges, test_edges = [], []
     for _ in trange(NUM_EPISODES * 2, desc='generating train episodes'):
-        train_edges.extend(generate_episode(env))
+        train_edges.extend(generate_episode(env, None))
     for _ in trange(NUM_EPISODES, desc='generating test episodes'):
-        test_edges.extend(generate_episode(env))
-
-    # # filter train data
-    # def get_edge_score(info):
-    #   info_torch = {k: [torch.tensor(x)[None] for x in v]  for k,v in info.items() if k != 'distance'}
-    #   true_distance = get_true_distance(info_torch).squeeze().item()
-    #   return info['distance'] / max(1, true_distance)
-    #
-    # random.shuffle(train_edges)
-    # edge_scores = [get_edge_score(info) for *_, info in train_edges]
-    # best_edge_idxs = np.argsort(edge_scores)[:len(train_edges) // 4]
-    # train_edges = [train_edges[i] for i in best_edge_idxs]
+        test_edges.extend(generate_episode(env, None))
 
     # subsample test data
     random.shuffle(test_edges)
@@ -101,9 +98,7 @@ def get_train_and_test_data():
 
 # TRAIN MODELS
 
-def train_model(device, train_edges, test_edges):
-    distance_model = ZeldaAgent(2).to(device)
-    policy_model = ZeldaAgent(4).to(device)
+def train_model(device, distance_model, policy_model, train_edges, test_edges):
     distance_optim = torch.optim.Adam(distance_model.parameters(), lr=LEARNING_RATE)
     policy_optim = torch.optim.Adam(policy_model.parameters(), lr=LEARNING_RATE)
 
@@ -122,8 +117,7 @@ def train_model(device, train_edges, test_edges):
         true_dist, pred_dist = [], []
 
         for state, goal_state, action, info in (pbar := tqdm(train_loader, leave=False)):
-            state, goal_state, action, distance = state.to(device), goal_state.to(device), action.to(device), info['distance'].float().to(device)
-
+            distance = info['distance'].float().to(device)
             distance_optim.zero_grad()
             distance_preds = distance_model(state, goal_state)
             distance_loss = F.gaussian_nll_loss(distance_preds[:,0], distance, distance_preds[:,1].exp())
@@ -132,7 +126,7 @@ def train_model(device, train_edges, test_edges):
 
             policy_optim.zero_grad()
             action_preds = policy_model(state, goal_state)
-            policy_loss = F.cross_entropy(action_preds, action)
+            policy_loss = F.cross_entropy(action_preds, action.to(device))
             policy_loss.backward()
             policy_optim.step()
 
@@ -145,12 +139,6 @@ def train_model(device, train_edges, test_edges):
 
         print(f"[TRAIN] Epoch {epoch+1}/{NUM_EPOCHS} | Distance MSE: {np.mean(dist_err):.2f} | Policy Accuracy: {np.mean(policy_acc):.3f}")
 
-        # plt.scatter(true_dist, pred_dist)
-        # plt.xlabel('True Distance')
-        # plt.ylabel('Predicted Distance')
-        # plt.title('Training: True vs Predicted Distance')
-        # plt.show()
-
         # TEST
 
         distance_model.eval()
@@ -159,12 +147,12 @@ def train_model(device, train_edges, test_edges):
         true_dist, pred_dist = [], []
 
         for state, goal_state, _, info in (pbar := tqdm(test_loader, leave=False)):
-            state, goal_state, distance = state.to(device), goal_state.to(device), info['distance'].float().to(device)
             with torch.no_grad():
                 distance_preds = distance_model(state, goal_state)
                 action_preds = policy_model(state, goal_state)
-            distance_loss = F.gaussian_nll_loss(distance_preds[:,0], distance, distance_preds[:,1].exp())
 
+            distance = info['distance'].float().to(device)
+            distance_loss = F.gaussian_nll_loss(distance_preds[:,0], distance, distance_preds[:,1].exp())
             dist_err.append(F.mse_loss(distance_preds[:,0], distance).item())
             true_actions = get_true_actions(info)
             policy_acc.append((action_preds.softmax(-1).cpu() * true_actions).sum(-1).mean().item())
@@ -174,26 +162,26 @@ def train_model(device, train_edges, test_edges):
 
         print(f"[TEST]  Epoch {epoch+1}/{NUM_EPOCHS} | Distance MSE: {np.mean(dist_err):.2f} | Policy Accuracy: {np.mean(policy_acc):.3f}\n")
 
-        # plt.scatter(true_dist, pred_dist)
-        # plt.xlabel('True Distance')
-        # plt.ylabel('Predicted Distance')
-        # plt.title('Testing: True vs Predicted Distance')
-        # plt.show()
-
-    return distance_model
-
 
 if __name__ == "__main__":
-    full_train_edges, test_edges = get_train_and_test_data()
-    train_edges = full_train_edges[:3800]
-
     device = (
         torch.device('cuda') if torch.cuda.is_available() else
         torch.device('mps') if torch.backends.mps.is_available() else
         torch.device('cpu'))
 
+    distance_model = ZeldaAgent(2).to(device)
+    policy_model = ZeldaAgent(4).to(device)
+
+    full_train_edges, test_edges = get_train_and_test_data(policy_model)
+    train_edges = full_train_edges[:len(full_train_edges) // 2]
+
     for i in range(3):
-        distance_model = train_model(device, train_edges, test_edges)
+        train_model(device, distance_model, policy_model, train_edges, test_edges)
+
+        checkpoint_dir = Path(__file__).parent / 'checkpoints'
+        checkpoint_dir.mkdir(exist_ok=True)
+        torch.save(distance_model, checkpoint_dir / 'distance.ckpt')
+        torch.save(policy_model, checkpoint_dir / 'policy.ckpt')
 
         train_dataset = EdgeDataset(full_train_edges)
         train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=False)
@@ -203,8 +191,9 @@ if __name__ == "__main__":
             with torch.no_grad():
                 distance_preds = distance_model(state.to(device), goal_state.to(device))
             means, stds = distance_preds[:,0].cpu(), distance_preds[:,1].exp().cpu()
-            scores = (info['distance'] - means) / stds
+            # scores = (info['distance'] - means) / stds
+            scores = info['distance'] / torch.clamp(means, 1, np.inf)
             edge_scores.extend(scores.numpy().tolist())
 
         best_edge_idxs = np.argsort(edge_scores)[:len(full_train_edges) // 4]
-        train_edges = [full_train_edges[i] for i in best_edge_idxs[:3800]]
+        train_edges = [full_train_edges[i] for i in best_edge_idxs]
