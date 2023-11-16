@@ -180,8 +180,8 @@ if __name__ == "__main__":
 
         checkpoint_dir = Path(__file__).parent / 'checkpoints'
         checkpoint_dir.mkdir(exist_ok=True)
-        torch.save(distance_model, checkpoint_dir / 'distance.ckpt')
-        torch.save(policy_model, checkpoint_dir / 'policy.ckpt')
+        torch.save(distance_model.state_dict(), checkpoint_dir / 'distance.ckpt')
+        torch.save(policy_model.state_dict(), checkpoint_dir / 'policy.ckpt')
 
         train_dataset = EdgeDataset(full_train_edges)
         train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=False)

@@ -1,4 +1,6 @@
+import numpy as np
 from pathlib import Path
+from gym.spaces import Box
 from common.environments.nes import NESEnvironment
 
 class ZeldaEnvironment(NESEnvironment):
@@ -15,13 +17,21 @@ class ZeldaEnvironment(NESEnvironment):
     self.step(self.START, wait=120)
     self._backup()
 
+  @property
+  def action_space(self):
+    return Discrete(4)
+
+  @property
+  def observation_space(self):
+    return Box(low=0, high=255, shape=(240, 256, 3), dtype=np.uint8)
+
   def reset(self):
     self._restore()
     return self.step(0)
 
   def step(self, *args, **kwargs):
     obs = super().step(*args, **kwargs)
-    info = {'screen_pos': self.screen_pos, 'map_pos': self.map_pos}
+    info = {'screen_pos': self.screen_pos, 'map_pos': self.map_pos, 'pos': (*self.screen_pos, *self.map_pos)}
     return obs, info
 
   def pos_matches(self, a, b):
