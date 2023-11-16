@@ -17,30 +17,6 @@ KEYMAP = {
   pygame.K_d: ZeldaEnvironment.RIGHT}
 
 
-def step_from_keyboard(env):
-  for event in pygame.event.get():
-    if event.type == pygame.QUIT:
-      return None, False, False
-
-  pressed = pygame.key.get_pressed()
-  running = not pressed[pygame.K_ESCAPE] and not pressed[pygame.K_q]
-  action = sum(KEYMAP[k] for k in KEYMAP if pressed[k])
-  if pressed[pygame.K_r]:
-    frame, info = env.reset()
-  else:
-    frame, info = env.step(action)
-  return frame, info, running
-
-def step_from_model(env, policy, frame, goal):
-  torch_frame = torch.as_tensor(frame[None]).permute(0,3,1,2).float()
-  torch_goal = torch.as_tensor(goal[None]).permute(0,3,1,2).float()
-  action_probs = agent(torch_frame, torch_goal)[0]
-  # action = torch.argmax(action_probs)
-  action, = random.choices(range(len(action_probs)), weights=torch.softmax(action_probs, 0))
-  frame, info = env.step(action)
-  return frame, info, False
-
-
 # ENTRY POINT
 
 if __name__ == '__main__':
@@ -69,12 +45,19 @@ if __name__ == '__main__':
     policy.load_state_dict(torch.load(Path(__file__).parent / 'checkpoints' / 'policy.ckpt'))
     torch.set_grad_enabled(False)
 
-  running = True
-  while running:
-    if args.model:
-      frame, info, running = step_from_model(env, policy, frame, goal)
+  while True:
+    pressed = pygame.key.get_pressed()
+    if pressed[pygame.K_q] or pressed[pygame.K_ESCAPE] or any(e.type == pygame.QUIT for e in pygame.event.get()):
+      break
+    elif pressed[pygame.K_r]:
+      frame, info = env.reset()
+    elif args.model:
+      action_preds = policy(state, goal).softmax(-1)
+      action = torch.multinomial(action_preds, 1).numpy().item()
+      frame, info = env.step(action)
     else:
-      frame, info, running = step_from_keyboard(env)
+      action = sum(KEYMAP[k] for k in KEYMAP if pressed[k])
+      frame, info = env.step(action)
 
     pos_x, pos_y = info['screen_pos']
     map_x, map_y, map_l = info['map_pos']
