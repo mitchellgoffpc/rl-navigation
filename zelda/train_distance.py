@@ -1,6 +1,5 @@
 import random
 import numpy as np
-import matplotlib.pyplot as plt
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -46,13 +45,14 @@ def get_true_actions(info):
 
 # GENERATE DATA
 
-def generate_episode(env, policy_model):
+def generate_episode(env, policy_model, prev_edges):
     episode = []
     obs, info = env.reset()
     actions = [env.UP, env.DOWN, env.LEFT, env.RIGHT]
 
+    # Generate rollouts
     for j in range(NUM_STEPS):
-        if policy_model is not None:
+        if policy_model is not None and prev_edges is not None:
             with torch.no_grad():
                 torch_obs = torch.as_tensor(obs[None])
                 action_probs = policy_model(torch_obs, torch_obs * 0).softmax(-1)
@@ -64,6 +64,7 @@ def generate_episode(env, policy_model):
         for _ in range(NUM_REPEATS):
             obs, info = env.step(actions[action])
 
+    # Generate edges
     edges = []
     for i in range(len(episode)):
         for j in range(i+1, len(episode)):
@@ -77,22 +78,10 @@ def generate_episode(env, policy_model):
 
     return edges
 
-def get_train_and_test_data(policy_model):
+def get_rollout_data(policy_model, prev_edges, num_episodes):
     env = ZeldaEnvironment()
-
-    train_edges, test_edges = [], []
-    for _ in trange(NUM_EPISODES * 2, desc='generating train episodes'):
-        train_edges.extend(generate_episode(env, None))
-    for _ in trange(NUM_EPISODES, desc='generating test episodes'):
-        test_edges.extend(generate_episode(env, None))
-
-    # subsample test data
-    random.shuffle(test_edges)
-    test_edges = test_edges[:len(test_edges) // 10]
-
-    print(f"Collected {len(train_edges)} train edges and {len(test_edges)} test edges")
-
-    return train_edges, test_edges
+    return [edge for _ in trange(num_episodes, desc='generating episodes')
+                 for edge in generate_episode(env, policy_model, prev_edges)]
 
 
 # TRAIN MODELS
@@ -192,14 +181,21 @@ if __name__ == "__main__":
 
     distance_model = ZeldaAgent(2).to(device)
     policy_model = ZeldaAgent(4).to(device)
-
-    full_train_edges, test_edges = get_train_and_test_data(policy_model)
-    train_edges = full_train_edges[:len(full_train_edges) // 2]
+    train_edges, test_edges = None, None
 
     for i in range(3):
+        distance_model = ZeldaAgent(2).to(device)
+
+        # collect data
+        test_edges = get_rollout_data(policy_model, train_edges, NUM_EPISODES)  # test rollouts use train_edges as well
+        train_edges = get_rollout_data(policy_model, train_edges, NUM_EPISODES * 2)
+
+        random.shuffle(test_edges)
+        test_edges = test_edges[:len(test_edges) // 10]
+
         # train distance and policy models
-        train_distance_model(device, distance_model, train_edges, test_edges)
-        train_edges = filter_edges(distance_model, full_train_edges, len(full_train_edges) // 4)
+        train_distance_model(device, distance_model, train_edges[:len(train_edges) // 2], test_edges)
+        train_edges = filter_edges(distance_model, train_edges, len(train_edges) // 4)
         train_policy_model(device, policy_model, train_edges, test_edges)
         print("")
 
