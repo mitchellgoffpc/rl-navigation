@@ -10,13 +10,13 @@ class ZeldaEnvironment(NESEnvironment):
     super().__init__(Path(__file__).parent / f"zelda.nes")
     super().reset()
     self.wait(40)
-    super().step(self.START, wait=20)
-    super().step(self.START, wait=10)
-    super().step(self.A, wait=10)
+    self.act(self.START, wait=20)
+    self.act(self.START, wait=10)
+    self.act(self.A, wait=10)
     for _ in range(3):
-      super().step(self.SELECT, wait=1)
-    super().step(self.START, wait=20)
-    super().step(self.START, wait=120)
+      self.act(self.SELECT, wait=1)
+    self.act(self.START, wait=20)
+    self.act(self.START, wait=120)
     self._backup()
 
   @property
@@ -34,6 +34,10 @@ class ZeldaEnvironment(NESEnvironment):
   def step(self, action, *args, **kwargs):
     obs = super().step(self.ACTIONS[action], *args, **kwargs)
     return obs, 0, False, False, self.get_info()
+
+  def act(self, action, *args, **kwargs):
+    obs = super().step(action, *args, **kwargs)
+    return obs, self.get_info()
 
   def get_info(self):
     return {'screen_pos': self.screen_pos, 'map_pos': self.map_pos, 'pos': (*self.screen_pos, *self.map_pos)}

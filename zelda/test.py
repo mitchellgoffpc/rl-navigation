@@ -17,8 +17,6 @@ KEYMAP = {
   pygame.K_a: ZeldaEnvironment.LEFT,
   pygame.K_d: ZeldaEnvironment.RIGHT}
 
-ACTIONS = [ZeldaEnvironment.UP, ZeldaEnvironment.DOWN, ZeldaEnvironment.LEFT, ZeldaEnvironment.RIGHT]
-
 
 # ENTRY POINT
 
@@ -60,10 +58,10 @@ if __name__ == '__main__':
     elif args.model and goal_pos:
       action_preds = policy(frame[None], goal[None]).softmax(-1)
       action = torch.multinomial(action_preds, 1).numpy().item()
-      frame, info = env.step(ACTIONS[action])
+      frame, _, _, _, info = env.step(action)
     else:
       action = sum(KEYMAP[k] for k in KEYMAP if pressed[k])
-      frame, info = env.step(action)
+      frame, info = env.act(action)
 
     pos_x, pos_y, map_x, map_y, map_l = current_pos = info['pos']
     done = goal_pos and env.pos_matches(current_pos, goal_pos)
