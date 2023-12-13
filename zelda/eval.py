@@ -10,6 +10,7 @@ from zelda.models import ZeldaAgent
 from zelda.environment import ZeldaEnvironment
 
 BS = 8
+NUM_STEPS = 20
 NUM_REPEATS = 8
 NUM_ROLLOUTS = 128
 
@@ -29,7 +30,7 @@ def main(plot=True):
     for _ in trange(0, NUM_ROLLOUTS, BS, desc="Generating goal states"):
         ep_states, ep_positions = [], []
         obs, _ = env.reset()
-        for _ in range(20):
+        for _ in range(NUM_STEPS):
             action = env.action_space.sample()
             for _ in range(NUM_REPEATS):
                 obs, _, _, _, info = env.step(action)
@@ -48,7 +49,7 @@ def main(plot=True):
         batch_goal_pos = goal_positions[offset:offset+BS]
         batch_finished = finished[offset:offset+BS]
 
-        for _ in range(20):
+        for _ in range(NUM_STEPS):
             with torch.no_grad():
                 action_probs = policy(obs, batch_goals).softmax(-1)
             action = torch.multinomial(action_probs, 1).cpu().numpy().squeeze(1)
