@@ -35,11 +35,6 @@ class ZeldaEnvironment(NESEnvironment):
     obs = super().step(self.ACTIONS[action], *args, **kwargs)
     return obs, 0, False, False, self.get_info()
 
-  def pos_matches(self, a, b):
-    ax, ay, amx, amy, aml = map(int, a)
-    bx, by, bmx, bmy, bml = map(int, b)
-    return abs(ax - bx) <= 4 and abs(ay - by) <= 4 and (amx, amy, aml) == (bmx, bmy, bml)
-
   def get_info(self):
     return {'screen_pos': self.screen_pos, 'map_pos': self.map_pos, 'pos': (*self.screen_pos, *self.map_pos)}
 
@@ -51,6 +46,12 @@ class ZeldaEnvironment(NESEnvironment):
   def map_pos(self):
     # NOTE: 0x0609 is the song type, this is the only way I can find to reliably determine which map level you're on.
     return int(self.ram[0xEB] % 0x10), int(self.ram[0xEB] // 0x10), int(self.ram[0x0609] != 1)
+
+  @classmethod
+  def pos_matches(cls, a, b, tolerance=4):
+    ax, ay, amx, amy, aml = map(int, a)
+    bx, by, bmx, bmy, bml = map(int, b)
+    return abs(ax - bx) <= tolerance and abs(ay - by) <= tolerance and (amx, amy, aml) == (bmx, bmy, bml)
 
 
 # REGISTER GYM ENVIRONMENT

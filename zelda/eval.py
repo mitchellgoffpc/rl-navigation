@@ -14,49 +14,56 @@ NUM_REPEATS = 8
 NUM_ROLLOUTS = 128
 
 def main(plot=True):
+    device = (
+        torch.device('cuda') if torch.cuda.is_available() else
+        torch.device('mps') if torch.backends.mps.is_available() else
+        torch.device('cpu'))
+
     env = gym.vector.make('zelda', BS)
-    policy = ZeldaAgent(4).eval()
+    policy = ZeldaAgent(4).eval().to(device)
     policy.load_state_dict(torch.load(Path(__file__).parent / 'checkpoints' / 'policy.ckpt'))
     torch.set_grad_enabled(False)
 
     # Run rollouts to collect candidate goal states
-    rollouts = []
-    for _ in trange(NUM_ROLLOUTS // BS, desc="Generating goal states"):
-        states = []
-        positions = []
+    goals, goal_positions = [], []
+    for _ in trange(0, NUM_ROLLOUTS, BS, desc="Generating goal states"):
+        ep_states, ep_positions = [], []
         obs, _ = env.reset()
         for _ in range(20):
             action = env.action_space.sample()
             for _ in range(NUM_REPEATS):
                 obs, _, _, _, info = env.step(action)
-            states.append(obs)
-            positions.append(info['pos'])
-        for i in range(BS):
-            rollouts.append([(state[i], pos[i]) for state, pos in zip(states, positions)])
+            ep_states.append(obs)
+            ep_positions.append(info['pos'])
 
-    # Select 100 goal states, randomly sampled from these rollouts
-    goal_states = [random.choice(rollout) for rollout in rollouts]
+        for i, idx in enumerate(np.random.randint(0, len(ep_states), size=BS)):
+          goals.append(ep_states[idx][i])
+          goal_positions.append(ep_positions[idx][i])
 
     # Run the model in a loop, one episode per goal state
-    # batches = [goal_states[i:i+BS] for i in range(0, len(goal_states), BS)]
-    env = gym.make('zelda')
     finished = np.zeros(NUM_ROLLOUTS, dtype=bool)
-    for idx, (goal, goal_pos) in enumerate(tqdm(goal_states, desc="Evaluating model")):
+    for offset in trange(0, NUM_ROLLOUTS, BS, desc="Evaluating model"):
         obs, _ = env.reset()
+        batch_goals = np.stack(goals[offset:offset+BS], axis=0)
+        batch_goal_pos = goal_positions[offset:offset+BS]
+        batch_finished = finished[offset:offset+BS]
+
         for _ in range(20):
-            action_probs = policy(obs[None], goal[None]).softmax(-1)
-            action = torch.multinomial(action_probs, 1).cpu().numpy().item()
+            with torch.no_grad():
+                action_probs = policy(obs, batch_goals).softmax(-1)
+            action = torch.multinomial(action_probs, 1).cpu().numpy().squeeze(1)
             for _ in range(NUM_REPEATS):
                 obs, _, _, _, info = env.step(action)
-            if env.pos_matches(info['pos'], goal_pos):
-                finished[idx] = True
+            at_goal = [ZeldaEnvironment.pos_matches(pos, goal_pos, tolerance=10) for pos, goal_pos in zip(info['pos'], batch_goal_pos)]
+            batch_finished |= np.array(at_goal, dtype=bool)
+            if np.all(batch_finished):
                 break
 
     print(f"Success rate: {np.mean(finished) * 100}%")
 
     # Plot which goals were successfully reached
     if args.plot:
-        goal_positions = np.array([s[1] for s in goal_states], dtype=int)
+        goal_positions = np.array(goal_positions, dtype=int)
         plt.scatter(goal_positions[finished][:, 0], 255 - goal_positions[finished][:, 1])
         plt.scatter(goal_positions[~finished][:, 0], 255 - goal_positions[~finished][:, 1])
         plt.show()
