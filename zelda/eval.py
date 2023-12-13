@@ -37,17 +37,11 @@ def main(plot=True):
     # Select 100 goal states, randomly sampled from these rollouts
     goal_states = [random.choice(rollout) for rollout in rollouts]
 
-    # Plot the goal states
-    if args.plot:
-        goal_positions = np.array(goal_states, dtype=int)
-        plt.scatter(goal_positions[:, 0], 255 - goal_positions[:, 1])
-        plt.show()
-
     # Run the model in a loop, one episode per goal state
     # batches = [goal_states[i:i+BS] for i in range(0, len(goal_states), BS)]
     env = gym.make('zelda')
-    successes = 0
-    for goal, goal_pos in tqdm(goal_states, desc="Evaluating model"):
+    finished = np.zeros(NUM_ROLLOUTS, dtype=bool)
+    for idx, (goal, goal_pos) in enumerate(tqdm(goal_states, desc="Evaluating model")):
         obs, _ = env.reset()
         for _ in range(20):
             action_probs = policy(obs[None], goal[None]).softmax(-1)
@@ -55,12 +49,17 @@ def main(plot=True):
             for _ in range(NUM_REPEATS):
                 obs, _, _, _, info = env.step(action)
             if env.pos_matches(info['pos'], goal_pos):
-                successes += 1
+                finished[idx] = True
                 break
 
-    # Record the percentage of rollouts which successfully reach the goal state
-    success_rate = successes / len(goal_states)
-    print(f"Success rate: {success_rate * 100}%")
+    print(f"Success rate: {np.mean(finished) * 100}%")
+
+    # Plot which goals were successfully reached
+    if args.plot:
+        goal_positions = np.array([s[1] for s in goal_states], dtype=int)
+        plt.scatter(goal_positions[finished][:, 0], 255 - goal_positions[finished][:, 1])
+        plt.scatter(goal_positions[~finished][:, 0], 255 - goal_positions[~finished][:, 1])
+        plt.show()
 
 
 if __name__ == '__main__':
