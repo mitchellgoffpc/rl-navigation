@@ -3,8 +3,6 @@ import numpy as np
 from pathlib import Path
 from common.environments.nes import NESEnvironment
 
-gym.register('zelda', lambda *args, **kwargs: ZeldaEnvironment(*args, **kwargs))
-
 class ZeldaEnvironment(NESEnvironment):
   ACTIONS = [NESEnvironment.UP, NESEnvironment.DOWN, NESEnvironment.LEFT, NESEnvironment.RIGHT]
 
@@ -53,3 +51,7 @@ class ZeldaEnvironment(NESEnvironment):
   def map_pos(self):
     # NOTE: 0x0609 is the song type, this is the only way I can find to reliably determine which map level you're on.
     return int(self.ram[0xEB] % 0x10), int(self.ram[0xEB] // 0x10), int(self.ram[0x0609] != 1)
+
+
+# REGISTER GYM ENVIRONMENT
+gym.register('zelda', ZeldaEnvironment)
