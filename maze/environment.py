@@ -1,6 +1,7 @@
 import random
 import numpy as np
 import gymnasium as gym
+from collections import deque
 
 def frontier(grid, x, y):
   f = set()
@@ -57,6 +58,8 @@ def generate_maze(width, height):
 
 
 class MazeEnv(gym.Env):
+  MOVES = {0: (-1, 0), 1: (0, 1), 2: (1, 0), 3: (0, -1)}  # action: 0=up, 1=right, 2=down, 3=left
+
   def __init__(self, width, height):
     self.width = width
     self.height = height
@@ -71,14 +74,15 @@ class MazeEnv(gym.Env):
     while True:
       yield random.randint(0, self.height - 1), random.randint(0, self.width - 1)
 
-  def obs(self):
+  def obs(self, position=None):
+    if position is None: position = self.current_position
     obs = np.zeros((self.height, self.width), dtype=np.uint8)
     obs[:] = self.maze
     obs[self.goal_position] = 3
-    obs[self.current_position] = 2
+    obs[position] = 2
     return obs
 
-  def info(self):
+  def info(self, position=None):
     return {'position': self.current_position, 'goal': self.goal_position}
 
   def reset(self):
@@ -89,8 +93,7 @@ class MazeEnv(gym.Env):
     return self.obs(), self.info()
 
   def step(self, action):
-    moves = {0: (-1, 0), 1: (0, 1), 2: (1, 0), 3: (0, -1)}  # action: 0=up, 1=right, 2=down, 3=left
-    move = moves[action]
+    move = MazeEnv.MOVES[action]
     next_position = (self.current_position[0] + move[0], self.current_position[1] + move[1])
     if self.is_valid_move(*next_position):
       self.current_position = next_position
@@ -98,6 +101,30 @@ class MazeEnv(gym.Env):
       return self.obs(), 1, True, False, self.info()
     else:
       return self.obs(), -1, False, False, self.info()
+
+  def next_obs(self, action):
+    next_position = (self.current_position[0] + MazeEnv.MOVES[action][0], self.current_position[1] + MazeEnv.MOVES[action][1])
+    if self.is_valid_move(*next_position):
+        return self.obs(next_position), self.info(next_position)
+    else:
+        return self.obs(), self.info()
+
+  def solve(self):
+    queue = deque([(self.current_position, [])])
+    visited = set([self.current_position])
+
+    while queue:
+      current, path = queue.popleft()
+      if current == self.goal_position:
+        return path
+
+      for action, move in MazeEnv.MOVES.items():
+        next_position = (current[0] + move[0], current[1] + move[1])
+        if next_position not in visited and self.is_valid_move(*next_position):
+          visited.add(next_position)
+          queue.append((next_position, path + [action]))
+
+    return []
 
 
 if __name__ == "__main__":
