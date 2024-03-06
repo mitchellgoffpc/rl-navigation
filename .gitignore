@@ -3,3 +3,4 @@
 zelda/datasets/random/data/
 zelda/datasets/expert/data/
 zelda/checkpoints/
+*.ckpt

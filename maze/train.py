@@ -4,149 +4,164 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from pathlib import Path
+from tqdm import trange, tqdm
 from common.replay import ReplayBuffer
 from maze.environment import MazeEnv
 
-NUM_EPISODES = 10000
-NUM_STEPS = 20
-NUM_TRAINING_STEPS = 10
-BATCH_SIZE = 64
+NUM_EPISODES = 100000
+NUM_STEPS = 10
+NUM_TRAINING_STEPS = 1
+BATCH_SIZE = 128
 
 class MLP(nn.Module):
   def __init__(self, input_size, output_size):
       super().__init__()
-      self.embed = nn.Embedding(4, 4)
-      self.fc1 = nn.Linear(input_size * 2 * 4, 128)
-      self.fc2 = nn.Linear(128, 64)
-      self.fc3 = nn.Linear(64, output_size)
+      self.embed = nn.Embedding(4, 16)
+      self.conv1 = nn.Conv2d(32, 32, 3, padding=1)
+      self.conv2 = nn.Conv2d(32, 64, 3, padding=1)
+      self.fc1 = nn.Linear(input_size * 64, 128)
+      self.fc2 = nn.Linear(128, output_size)
 
   def forward(self, state, goal):
-    x = torch.cat([state, goal], dim=-1).long()
-    x = self.embed(x).flatten(start_dim=1)
+    x = torch.stack([state, goal], dim=1).long()
+    x = self.embed(x)
+    x = x.permute(0, 1, 4, 2, 3).reshape(x.size(0), -1, x.size(2), x.size(3))
+    x = F.relu(self.conv1(x))
+    x = F.relu(self.conv2(x))
+    x = x.flatten(start_dim=1)
     x = F.relu(self.fc1(x))
-    x = F.relu(self.fc2(x))
-    x = self.fc3(x)
+    x = self.fc2(x)
     return x
 
 
 def train():
-  env = MazeEnv(5, 5)
-  replay = ReplayBuffer(1000)
+  env = MazeEnv(7, 7)
+  device = torch.device('cpu')
   distance_model = MLP(math.prod(env.observation_space.shape), 1)
-  policy_model = MLP(math.prod(env.observation_space.shape), env.action_space.n)
-  distance_optimizer = torch.optim.Adam(distance_model.parameters(), lr=3e-4)
-  policy_optimizer = torch.optim.Adam(policy_model.parameters(), lr=3e-4)
-  wins = 0
-  total_loss = 0
+  policy_model = MLP(math.prod(env.observation_space.shape), env.action_space.n).to(device)
+  distance_optimizer = torch.optim.AdamW(distance_model.parameters(), lr=3e-4)
+  policy_optimizer = torch.optim.AdamW(policy_model.parameters(), lr=3e-4)
 
-  for episode in range(1, NUM_EPISODES + 1):
+  # collect dataset
 
-    # generate rollout
-    distance_model.eval()
+  train_steps = []
+  for _ in trange(NUM_EPISODES, desc="Generating train set"):
     state, _ = env.reset()
-    goal = state.copy()
-    goal[state == 2] = 1
-    goal[state == 3] = 2
-    for _ in range(NUM_STEPS):
-      # action = random.randrange(env.action_space.n)
-      with torch.no_grad():
-        preds = policy_model(torch.as_tensor(state)[None], torch.as_tensor(goal)[None])
-        action = torch.multinomial(F.softmax(preds, dim=-1), 1).item()
+    for i in range(NUM_STEPS):
+      correct_action = env.solve()[0]
+      action = random.randrange(env.action_space.n)
       next_state, reward, done, _, _ = env.step(action)
-      replay.add_step(state, action, reward, next_state, done)
+      train_steps.append((state, correct_action))
       state = next_state
       if done:
-        wins += 1
         break
 
-    replay.commit()
+  val_steps = []
+  for _ in trange(NUM_EPISODES, desc="Generating val set"):
+    state, _ = env.reset()
+    for _ in range(NUM_STEPS):
+      correct_action = env.solve()[0]
+      action = random.randrange(env.action_space.n)
+      next_state, reward, done, _, _ = env.step(action)
+      val_steps.append((state, correct_action))
+      state = next_state
+      if done:
+        break
 
-    # train on samples from replay buffer
-    distance_model.train()
-    for _ in range(NUM_TRAINING_STEPS):
-      states, actions, _, next_states, _, mask = replay.sample(BATCH_SIZE, NUM_STEPS)
-      targets = np.random.randint(0, np.sum(mask, axis=-1), size=BATCH_SIZE)
-      goals = states[np.arange(BATCH_SIZE), targets]
 
-      preds = distance_model(torch.as_tensor(states[:, 0]), torch.as_tensor(goals))
-      loss = F.smooth_l1_loss(preds, torch.as_tensor(targets)[:, None].float())
-      total_loss += loss.item()
-      distance_optimizer.zero_grad()
-      loss.backward()
-      distance_optimizer.step()
+  # train policy
 
-      advantages = torch.as_tensor(targets) - distance_model(torch.as_tensor(states[:, 0]), torch.as_tensor(goals)).squeeze()
-      mask = advantages < advantages.mean()
-      preds = policy_model(torch.as_tensor(states)[mask, 0], torch.as_tensor(goals)[mask])
-      loss = F.cross_entropy(preds, torch.as_tensor(actions)[mask, 0])
+  for _ in range(5):
+
+    # training
+    train_loss = 0
+    train_correct, train_total = 0, 0
+    policy_model.train()
+    random.shuffle(train_steps)
+    for i in trange(0, len(train_steps), BATCH_SIZE, leave=False, desc="Train"):
+      states, correct_actions = zip(*train_steps[i:i+BATCH_SIZE])
+      states, correct_actions = np.array(states), np.array(correct_actions)
+      preds = policy_model(torch.as_tensor(states), torch.as_tensor(states))
+      loss = F.cross_entropy(preds, torch.as_tensor(correct_actions).to(device), reduction="none")
       policy_optimizer.zero_grad()
-      loss.backward()
+      loss.mean().backward()
       policy_optimizer.step()
 
-      # advantages = distance_model(torch.as_tensor(states[:, 0]), torch.as_tensor(goals)) - distance_model(torch.as_tensor(next_states[:, 0]), torch.as_tensor(goals))
-      # advantages = advantages.detach().squeeze()
-      # advantages = advantages - advantages.mean()
-      # preds = policy_model(torch.as_tensor(states[:, 0]), torch.as_tensor(goals))
-      # preds = F.softmax(preds, dim=-1)
-      # preds = preds[torch.arange(BATCH_SIZE), actions[:, 0]]
-      # loss = -(preds * advantages).mean()
-      # policy_optimizer.zero_grad()
-      # loss.backward()
-      # policy_optimizer.step()
+      train_loss += loss.sum().item()
+      train_correct += np.sum(np.argmax(preds.cpu().detach().numpy(), axis=-1) == correct_actions)
+      train_total += len(states)
 
-      # if episode % 100 == 0:
-      #   print(states[0, 0])
-      #   print(next_states[0, 0])
-      #   print(goals[0])
-      #   print(actions[0, 0], advantages[0], preds[0], targets[0])
-      #   print()
-
+    # validation
+    val_loss = 0
+    val_correct, val_total = 0, 0
+    policy_model.eval()
+    with torch.no_grad():
+      for i in trange(0, len(val_steps), BATCH_SIZE, leave=False, desc="Val"):
+        states, correct_actions = zip(*val_steps[i:i+BATCH_SIZE])
+        states, correct_actions = np.array(states), np.array(correct_actions)
+        preds = policy_model(torch.as_tensor(states), torch.as_tensor(states))
+        loss = F.cross_entropy(preds, torch.as_tensor(correct_actions).to(device), reduction="sum")
+        val_loss += loss.item()
+        val_correct += np.sum(np.argmax(preds.cpu().numpy(), axis=-1) == correct_actions)
+        val_total += len(states)
 
     # print metrics
-    if episode % 100 == 0:
-      evaluated_wins = 0
-      evaluated_steps = 0
-      starting_distances = []
-      episode_wins = []
+    torch.save(policy_model.state_dict(), Path(__file__).parent / 'policy.ckpt')
+    print(f"POLICY: "
+          f"Train accuracy: {train_correct / train_total * 100:.2f}%, Train loss: {train_loss / train_total:.4f}, "
+          f"Val accuracy: {val_correct / val_total * 100:.2f}%, Val loss: {val_loss / val_total:.4f}")
 
-      distance_model.eval()
-      for _ in range(100):
-        state, info = env.reset()
-        starting_distances.append(np.abs(np.argwhere(state == 2) - np.argwhere(state == 3)).sum())
-        goal = state.copy()
-        goal[state == 2] = 1
-        goal[state == 3] = 2
-        for step in range(NUM_STEPS):
-          # distances = []
-          # for action in MazeEnv.MOVES:
-          #   next_state, _ = env.next_obs(action)
-          #   distances.append(distance_model(torch.as_tensor(next_state)[None], torch.as_tensor(goal)[None]).squeeze().item())
-          # norm_distances = np.array(distances) - np.mean(distances)
-          # action = torch.multinomial(F.softmax(torch.tensor(-norm_distances), dim=-1), 1).item()
-          preds = policy_model(torch.as_tensor(state)[None], torch.as_tensor(goal)[None])
-          action = torch.multinomial(F.softmax(preds, dim=-1), 1).item()
-          state, _, done, _, _ = env.step(action)
-          if done:
-            evaluated_wins += 1
-            break
 
-        episode_wins.append(step < NUM_STEPS - 1)
-        evaluated_steps += step + 1
+  # train distance
 
-      import matplotlib.pyplot as plt
-      plt.figure(figsize=(12, 6))
-      unique_distances = np.unique(starting_distances)
-      avg_wins = [np.mean(np.array(episode_wins)[np.array(starting_distances) == d]) for d in unique_distances]
-      plt.bar(unique_distances, avg_wins)
-      plt.xlabel('Starting Distance')
-      plt.ylabel('Number of Wins')
-      plt.title('Number of Wins for each Starting Distance')
-      plt.show()
+  for _ in range(0):
 
-      print(f"Episode: {episode}, wins: {wins}, average loss: {total_loss / (NUM_TRAINING_STEPS * 10):.4f}, eval wins: {evaluated_wins}, eval episode length: {evaluated_steps / 100:.2f}")
-      wins = 0
-      total_loss = 0
+    # training
+    train_loss = 0
+    train_total = 0
+    distance_model.train()
+    for i in trange(0, len(train_steps), BATCH_SIZE, leave=False, desc="Train"):
+      indices = np.random.randint(0, len(train_steps), size=BATCH_SIZE)
+      steps_diff = np.random.uniform(-20, 20, size=BATCH_SIZE).astype(int)
+      goal_indices = np.clip(indices + steps_diff, 0, len(train_steps) - 1)
+      states, _ = zip(*[train_steps[idx] for idx in indices])
+      goals, _ = zip(*[train_steps[idx] for idx in goal_indices])
+      states, goals = np.array(states), np.array(goals)
+      steps_diff = np.abs(steps_diff)
 
+      preds = distance_model(torch.as_tensor(states), torch.as_tensor(goals))
+      loss = F.mse_loss(preds.squeeze(), torch.as_tensor(steps_diff, dtype=torch.float32).to(device), reduction="none")
+      distance_optimizer.zero_grad()
+      loss.mean().backward()
+      distance_optimizer.step()
+      train_loss += loss.sum().item()
+      train_total += len(states)
+
+    # validation
+    val_loss = 0
+    val_total = 0
+    distance_model.eval()
+    with torch.no_grad():
+      for i in trange(0, len(val_steps), BATCH_SIZE, leave=False, desc="Val"):
+        indices = np.arange(i, min(i + BATCH_SIZE, len(val_steps)))
+        steps_diff = np.random.uniform(-20, 20, size=len(indices)).astype(int)
+        goal_indices = np.clip(indices + steps_diff, 0, len(val_steps) - 1)
+        states, _ = zip(*[val_steps[idx] for idx in indices])
+        goals, _ = zip(*[val_steps[idx] for idx in goal_indices])
+        states, goals = np.array(states), np.array(goals)
+        steps_diff = np.abs(steps_diff)
+
+        preds = distance_model(torch.as_tensor(states), torch.as_tensor(goals))
+        loss = F.mse_loss(preds.squeeze(), torch.as_tensor(steps_diff, dtype=torch.float32).to(device), reduction="sum")
+        val_loss += loss.item()
+        val_total += len(states)
+
+    # print metrics
+    torch.save(distance_model.state_dict(), Path(__file__).parent / 'distance.ckpt')
+    print(f"DISTANCE: "
+          f"Train loss: {train_loss / train_total:.4f}, "
+          f"Val loss: {val_loss / val_total:.4f}")
 
 
 if __name__ == '__main__':

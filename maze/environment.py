@@ -130,32 +130,75 @@ class MazeEnv(gym.Env):
 if __name__ == "__main__":
   import sys
   import cv2
+  import math
+  import torch
   import pygame
+  from pathlib import Path
+  from maze.train import MLP
   assert len(sys.argv) == 3, "Usage: python environment.py <width> <height>"
 
   WHITE = (255, 255, 255)
+  BLACK = (0, 0, 0)
   RED = (255, 0, 0)
   BLUE = (0, 0, 255)
   WIDTH, HEIGHT = int(sys.argv[1]), int(sys.argv[2])
-  SCALE = 10
+  SCALE = 20
+  PADDING = 80
+
+  env = MazeEnv(WIDTH, HEIGHT)
+  policy_model = None
+  if (Path(__file__).parent / 'policy.ckpt').exists():
+    policy_model = MLP(math.prod(env.observation_space.shape), env.action_space.n).train()
+    policy_model.load_state_dict(torch.load(Path(__file__).parent / 'policy.ckpt'))
 
   pygame.init()
-  screen = pygame.display.set_mode((WIDTH * SCALE, HEIGHT * SCALE))
+  screen = pygame.display.set_mode((WIDTH * SCALE, HEIGHT * SCALE + PADDING))
   clock = pygame.time.Clock()
-  env = MazeEnv(WIDTH, HEIGHT)
 
-  def draw(obs, *_):
-    screen.fill(WHITE)
+  def draw(obs, info, path=[]):
+    screen.fill(BLACK)
     maze_img = np.zeros((*obs.shape, 3), dtype=np.uint8)
     maze_img[obs == 1] = (255, 255, 255)
     maze_img[obs == 2] = (255, 0, 0)
     maze_img[obs == 3] = (0, 0, 255)
     maze_img = cv2.resize(maze_img, (WIDTH * SCALE, HEIGHT * SCALE), interpolation=cv2.INTER_NEAREST)
-    maze_img = pygame.surfarray.make_surface(maze_img.swapaxes(0, 1))
-    screen.blit(maze_img, (0, 0))
+    current_position = info['position']
+
+    # Draw shortest path
+    for step in path:
+      action_position = (current_position[0] + MazeEnv.MOVES[step][0], current_position[1] + MazeEnv.MOVES[step][1])
+      cv2.line(maze_img,
+               (current_position[1] * SCALE + SCALE // 2, current_position[0] * SCALE + SCALE // 2),
+               (action_position[1] * SCALE + SCALE // 2, action_position[0] * SCALE + SCALE // 2),
+               (0, 255, 0), 2)
+      current_position = action_position
+
+    # Draw policy model predictions
+    if policy_model is not None:
+      maze_img = cv2.copyMakeBorder(maze_img, 0, PADDING, 0, 0, cv2.BORDER_CONSTANT, value=0)
+      obs_tensor = torch.tensor(obs, dtype=torch.float32).unsqueeze(0)
+      with torch.no_grad():
+        action_probs = torch.softmax(policy_model(obs_tensor, obs_tensor), dim=1).squeeze().numpy()
+
+      arrow_colors = [(255 * prob, 255 * prob, 255 * prob) for prob in action_probs]
+      arrow_directions = [(0, -1), (1, 0), (0, 1), (-1, 0)]  # Up, Right, Down, Left
+      arrow_base_size = SCALE // 2
+
+      for direction, color in zip(arrow_directions, arrow_colors):
+        dx, dy = direction
+        center_x = WIDTH * SCALE // 2 + dx * arrow_base_size
+        center_y = HEIGHT * SCALE + (PADDING // 2) + dy * arrow_base_size
+        tip = (center_x + dx * arrow_base_size * 2, center_y + dy * arrow_base_size * 2)
+        left_corner = (center_x + dy * arrow_base_size, center_y - dx * arrow_base_size)
+        right_corner = (center_x - dy * arrow_base_size, center_y + dx * arrow_base_size)
+        cv2.fillPoly(maze_img, [np.array([tip, left_corner, right_corner])], color)
+
+    maze_surface = pygame.surfarray.make_surface(maze_img.swapaxes(0, 1))
+    screen.blit(maze_surface, (0, 0))
     pygame.display.flip()
 
-  draw(*env.reset())
+
+  draw(*env.reset(), path=env.solve())
 
   while True:
     action = None
@@ -164,21 +207,22 @@ if __name__ == "__main__":
         pygame.quit()
         sys.exit()
       elif event.type == pygame.KEYDOWN:
-        if event.key == pygame.K_w:
+        if event.key in (pygame.K_w, pygame.K_UP):
           action = 0
-        elif event.key == pygame.K_d:
+        elif event.key in (pygame.K_d, pygame.K_RIGHT):
           action = 1
-        elif event.key == pygame.K_s:
+        elif event.key in (pygame.K_s, pygame.K_DOWN):
           action = 2
-        elif event.key == pygame.K_a:
+        elif event.key in (pygame.K_a, pygame.K_LEFT):
           action = 3
+
 
     if action is None:
       continue
 
-    obs, reward, done, _, _ = env.step(action)
-    draw(obs)
+    obs, reward, done, _, info = env.step(action)
+    draw(obs, info, path=env.solve())
 
     if done:
-      draw(*env.reset())
+      draw(*env.reset(), path=env.solve())
     clock.tick(5)
