@@ -74,15 +74,13 @@ class MazeEnv(gym.Env):
     while True:
       yield random.randint(0, self.height - 1), random.randint(0, self.width - 1)
 
-  def obs(self, position=None):
-    if position is None: position = self.current_position
+  def obs(self, position):
     obs = np.zeros((self.height, self.width), dtype=np.uint8)
     obs[:] = self.maze
-    obs[self.goal_position] = 3
     obs[position] = 2
     return obs
 
-  def info(self, position=None):
+  def info(self):
     return {'position': self.current_position, 'goal': self.goal_position}
 
   def reset(self):
@@ -90,7 +88,7 @@ class MazeEnv(gym.Env):
     self.start_position = next(p for p in self.get_random_positions() if self.maze[p])
     self.goal_position = next(p for p in self.get_random_positions() if self.maze[p] and p != self.start_position)
     self.current_position = self.start_position
-    return self.obs(), self.info()
+    return self.obs(self.current_position), self.obs(self.goal_position), self.info()
 
   def step(self, action):
     move = MazeEnv.MOVES[action]
@@ -98,16 +96,9 @@ class MazeEnv(gym.Env):
     if self.is_valid_move(*next_position):
       self.current_position = next_position
     if self.current_position == self.goal_position:
-      return self.obs(), 1, True, False, self.info()
+      return self.obs(self.current_position), 1, True, False, self.info()
     else:
-      return self.obs(), -1, False, False, self.info()
-
-  def next_obs(self, action):
-    next_position = (self.current_position[0] + MazeEnv.MOVES[action][0], self.current_position[1] + MazeEnv.MOVES[action][1])
-    if self.is_valid_move(*next_position):
-        return self.obs(next_position), self.info(next_position)
-    else:
-        return self.obs(), self.info()
+      return self.obs(self.current_position), -1, False, False, self.info()
 
   def solve(self):
     queue = deque([(self.current_position, [])])
@@ -134,7 +125,7 @@ if __name__ == "__main__":
   import torch
   import pygame
   from pathlib import Path
-  from maze.train import MLP
+  from maze.train_distance_policy import MLP
   assert len(sys.argv) == 3, "Usage: python environment.py <width> <height>"
 
   WHITE = (255, 255, 255)
@@ -146,21 +137,25 @@ if __name__ == "__main__":
   PADDING = 80
 
   env = MazeEnv(WIDTH, HEIGHT)
-  policy_model = None
-  if (Path(__file__).parent / 'policy.ckpt').exists():
+
+  policy_model, distance_model = None, None
+  if (Path(__file__).parent / 'checkpoints/policy-db.ckpt').exists():
     policy_model = MLP(math.prod(env.observation_space.shape), env.action_space.n).train()
-    policy_model.load_state_dict(torch.load(Path(__file__).parent / 'policy.ckpt'))
+    policy_model.load_state_dict(torch.load(Path(__file__).parent / 'checkpoints/policy-db.ckpt'))
+  if (Path(__file__).parent / 'checkpoints/distance.ckpt').exists():
+    distance_model = MLP(math.prod(env.observation_space.shape), env.action_space.n).train()  # Assuming the distance model predicts a single value
+    distance_model.load_state_dict(torch.load(Path(__file__).parent / 'checkpoints/distance.ckpt'))
 
   pygame.init()
   screen = pygame.display.set_mode((WIDTH * SCALE, HEIGHT * SCALE + PADDING))
   clock = pygame.time.Clock()
 
-  def draw(obs, info, path=[]):
+  def draw(obs, goal, info, path=[]):
     screen.fill(BLACK)
     maze_img = np.zeros((*obs.shape, 3), dtype=np.uint8)
     maze_img[obs == 1] = (255, 255, 255)
     maze_img[obs == 2] = (255, 0, 0)
-    maze_img[obs == 3] = (0, 0, 255)
+    maze_img[goal == 2] = (0, 0, 255)
     maze_img = cv2.resize(maze_img, (WIDTH * SCALE, HEIGHT * SCALE), interpolation=cv2.INTER_NEAREST)
     current_position = info['position']
 
@@ -176,29 +171,40 @@ if __name__ == "__main__":
     # Draw policy model predictions
     if policy_model is not None:
       maze_img = cv2.copyMakeBorder(maze_img, 0, PADDING, 0, 0, cv2.BORDER_CONSTANT, value=0)
-      obs_tensor = torch.tensor(obs, dtype=torch.float32).unsqueeze(0)
+      obs_tensor = torch.tensor(obs, dtype=torch.float32)[None]
+      goal_tensor = torch.tensor(goal, dtype=torch.float32)[None]
       with torch.no_grad():
-        action_probs = torch.softmax(policy_model(obs_tensor, obs_tensor), dim=1).squeeze().numpy()
+        action_probs = torch.softmax(policy_model(obs_tensor, goal_tensor), dim=1).squeeze().numpy()
 
       arrow_colors = [(255 * prob, 255 * prob, 255 * prob) for prob in action_probs]
       arrow_directions = [(0, -1), (1, 0), (0, 1), (-1, 0)]  # Up, Right, Down, Left
-      arrow_base_size = SCALE // 2
+      arrow_base_size = SCALE // 3
 
       for direction, color in zip(arrow_directions, arrow_colors):
         dx, dy = direction
-        center_x = WIDTH * SCALE // 2 + dx * arrow_base_size
+        center_x = WIDTH * SCALE // 4 + dx * arrow_base_size
         center_y = HEIGHT * SCALE + (PADDING // 2) + dy * arrow_base_size
         tip = (center_x + dx * arrow_base_size * 2, center_y + dy * arrow_base_size * 2)
         left_corner = (center_x + dy * arrow_base_size, center_y - dx * arrow_base_size)
         right_corner = (center_x - dy * arrow_base_size, center_y + dx * arrow_base_size)
         cv2.fillPoly(maze_img, [np.array([tip, left_corner, right_corner])], color)
 
+    # Draw distance model predictions
+    if distance_model is not None:
+      obs_tensor = torch.as_tensor(obs)[None]
+      goal_tensor = torch.as_tensor(goal)[None]
+      with torch.no_grad():
+        distance = distance_model(obs_tensor, goal_tensor).min().item()
+      font = cv2.FONT_HERSHEY_SIMPLEX
+      cv2.putText(maze_img, f"{distance:.2f}", (maze_img.shape[1] - 50, maze_img.shape[0] - 20), font, 0.6, (255, 255, 255), 1, cv2.LINE_AA)
+
     maze_surface = pygame.surfarray.make_surface(maze_img.swapaxes(0, 1))
     screen.blit(maze_surface, (0, 0))
     pygame.display.flip()
 
 
-  draw(*env.reset(), path=env.solve())
+  state, goal, info = env.reset()
+  draw(state, goal, info, path=env.solve())
 
   while True:
     action = None
@@ -221,8 +227,9 @@ if __name__ == "__main__":
       continue
 
     obs, reward, done, _, info = env.step(action)
-    draw(obs, info, path=env.solve())
+    draw(obs, goal, info, path=env.solve())
 
     if done:
-      draw(*env.reset(), path=env.solve())
+      state, goal, info = env.reset()
+      draw(state, goal, info, path=env.solve())
     clock.tick(5)

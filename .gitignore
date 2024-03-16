@@ -1,5 +1,6 @@
 .DS_Store
 *.nes
+maze/checkpoints/
 zelda/datasets/random/data/
 zelda/datasets/expert/data/
 zelda/checkpoints/
