@@ -6,7 +6,7 @@ from pathlib import Path
 from tqdm import trange
 from maze.models import MLP
 from maze.environment import MazeEnv
-from maze.helpers import batch, generate_data
+from maze.helpers import batch, generate_data, evaluate_policy
 
 NUM_EPISODES = 10000
 NUM_STEPS = 10
@@ -31,11 +31,11 @@ def train():
       start_idxs = np.random.randint(0, NUM_STEPS - 1, size=BATCH_SIZE)
       state_idxs = episode_idxs * NUM_STEPS + start_idxs # np.random.randint(0, NUM_STEPS, size=BATCH_SIZE)
       goal_idxs = episode_idxs * NUM_STEPS + np.random.randint(start_idxs + 1, NUM_STEPS, size=BATCH_SIZE)
-      states, _, actions, *_ = batch(train_steps, state_idxs)
+      states, _, actions, *_ = batch(train_steps, state_idxs, device=device)
       goals, *_ = batch(train_steps, goal_idxs)
       step_diffs = goal_idxs - state_idxs # np.abs(state_idxs - goal_idxs)
 
-      preds = distance_model(torch.as_tensor(states), torch.as_tensor(goals))
+      preds = distance_model(states, goals)
       preds = preds[torch.arange(len(actions)), actions]
       loss = F.mse_loss(preds.squeeze(), torch.as_tensor(step_diffs, dtype=torch.float32).to(device), reduction="none")
       distance_optimizer.zero_grad()
@@ -54,21 +54,29 @@ def train():
         start_idxs = np.random.randint(0, NUM_STEPS - 1, size=BATCH_SIZE)
         state_idxs = episode_idxs * NUM_STEPS + start_idxs # np.random.randint(0, NUM_STEPS, size=BATCH_SIZE)
         goal_idxs = episode_idxs * NUM_STEPS + np.random.randint(start_idxs + 1, NUM_STEPS, size=BATCH_SIZE)
-        states, _, actions, *_ = batch(val_steps, state_idxs)
+        states, _, actions, *_ = batch(val_steps, state_idxs, device=device)
         goals, *_ = batch(val_steps, goal_idxs)
         step_diffs = goal_idxs - state_idxs # np.abs(state_idxs - goal_idxs)
 
-        preds = distance_model(torch.as_tensor(states), torch.as_tensor(goals))
+        preds = distance_model(states, goals)
         preds = preds[torch.arange(len(actions)), actions]
         loss = F.mse_loss(preds.squeeze(), torch.as_tensor(step_diffs, dtype=torch.float32).to(device), reduction="sum")
         val_loss += loss.item()
         val_total += len(states)
 
+    def policy_fn(state, goal):
+      with torch.no_grad():
+        distances = distance_model(state, goal)
+        probs = F.softmax(-(distances - distances.mean()), dim=-1)
+        return torch.multinomial(probs, 1).item()
+    win_rate = evaluate_policy(env, policy_fn, 1000, 20, device=device)
+
     # print metrics
     torch.save(distance_model.state_dict(), Path(__file__).parent / 'checkpoints/distance.ckpt')
     print(f"DISTANCE: "
           f"Train loss: {train_loss / train_total:.4f}, "
-          f"Val loss: {val_loss / val_total:.4f}")
+          f"Val loss: {val_loss / val_total:.4f}, "
+          f"Win rate: {win_rate * 100:.2f}%")
 
 
 if __name__ == "__main__":

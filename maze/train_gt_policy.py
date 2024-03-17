@@ -1,6 +1,5 @@
 import math
 import random
-import numpy as np
 import torch
 import torch.nn.functional as F
 from pathlib import Path
@@ -29,15 +28,15 @@ def train():
     policy_model.train()
     random.shuffle(train_steps)
     for i in trange(0, len(train_steps), BATCH_SIZE, leave=False, desc="GT POLICY - TRAIN"):
-      states, goals, actions, _, correct_actions, correct_distances, correct_next_distances = batch(train_steps[i:i+BATCH_SIZE])
-      preds = policy_model(torch.as_tensor(states), torch.as_tensor(goals))
-      loss = F.cross_entropy(preds, torch.as_tensor(correct_actions).to(device), reduction="sum")
+      states, goals, _, _, _, correct_actions, *_ = batch(train_steps[i:i+BATCH_SIZE], device=device)
+      preds = policy_model(states, goals)
+      loss = F.cross_entropy(preds, correct_actions, reduction="none")
       policy_optimizer.zero_grad()
       loss.mean().backward()
       policy_optimizer.step()
 
       train_loss += loss.sum().item()
-      train_correct += np.sum(np.argmax(preds.cpu().detach().numpy(), axis=-1) == correct_actions)
+      train_correct += torch.sum(preds.argmax(dim=-1) == correct_actions).item()
       train_total += len(states)
 
     # validation
@@ -46,18 +45,18 @@ def train():
     policy_model.eval()
     with torch.no_grad():
       for i in trange(0, len(val_steps), BATCH_SIZE, leave=False, desc="GT POLICY - VAL"):
-        states, goals, _, _, correct_actions, *_ = batch(val_steps[i:i+BATCH_SIZE])
-        preds = policy_model(torch.as_tensor(states), torch.as_tensor(goals))
-        loss = F.cross_entropy(preds, torch.as_tensor(correct_actions).to(device), reduction="sum")
+        states, goals, _, _, _, correct_actions, *_ = batch(val_steps[i:i+BATCH_SIZE], device=device)
+        preds = policy_model(states, goals)
+        loss = F.cross_entropy(preds, correct_actions, reduction="sum")
         val_loss += loss.item()
-        val_correct += np.sum(np.argmax(preds.cpu().numpy(), axis=-1) == correct_actions)
+        val_correct += torch.sum(preds.argmax(dim=-1) == correct_actions).item()
         val_total += len(states)
 
     def policy_fn(state, goal):
       with torch.no_grad():
-        probs = F.softmax(policy_model(torch.as_tensor([state]), torch.as_tensor([goal])), dim=-1)
+        probs = F.softmax(policy_model(state, goal), dim=-1)
         return torch.multinomial(probs, 1).item()
-    win_rate = evaluate_policy(env, policy_fn, 1000, 20)
+    win_rate = evaluate_policy(env, policy_fn, 1000, 20, device=device)
 
     # print metrics
     torch.save(policy_model.state_dict(), Path(__file__).parent / 'checkpoints/gt-policy.ckpt')

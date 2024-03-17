@@ -1,6 +1,5 @@
 import math
 import random
-import numpy as np
 import torch
 import torch.nn.functional as F
 from pathlib import Path
@@ -31,18 +30,18 @@ def train():
     policy_model.train()
     random.shuffle(train_steps)
     for i in trange(0, len(train_steps), BATCH_SIZE, leave=False, desc="DISTANCE POLICY - TRAIN"):
-      states, goals, actions, _, correct_actions, _, _ = batch(train_steps[i:i+BATCH_SIZE])
+      states, goals, _, _, _, correct_actions, *_ = batch(train_steps[i:i+BATCH_SIZE])
       with torch.no_grad():
-        distances = distance_model(torch.as_tensor(states), torch.as_tensor(goals))
+        distances = distance_model(states, goals)
         targets = F.softmax(-(distances - distances.mean()), dim=-1)
 
-      preds = policy_model(torch.as_tensor(states), torch.as_tensor(goals))
+      preds = policy_model(states, goals)
       loss = F.cross_entropy(preds, targets, reduction="none")
       policy_optimizer.zero_grad()
       loss.mean().backward()
       policy_optimizer.step()
       train_loss += loss.sum().item()
-      train_correct += np.sum(np.argmax(preds.cpu().detach().numpy(), axis=-1) == correct_actions)
+      train_correct += (preds.argmax(dim=-1) == correct_actions).sum()
       train_total += len(states)
 
     # validation
@@ -51,20 +50,20 @@ def train():
     policy_model.eval()
     with torch.no_grad():
       for i in trange(0, len(val_steps), BATCH_SIZE, leave=False, desc="DISTANCE POLICY - VAL"):
-        states, goals, actions, _, correct_actions, correct_distances, correct_next_distances = batch(train_steps[i:i+BATCH_SIZE])
+        states, goals, _, _, _, correct_actions, *_ = batch(train_steps[i:i+BATCH_SIZE])
         with torch.no_grad():
-          distances = distance_model(torch.as_tensor(states), torch.as_tensor(goals))
+          distances = distance_model(states, goals)
           targets = distances.argmin(dim=-1)
 
-        preds = policy_model(torch.as_tensor(states), torch.as_tensor(goals))
+        preds = policy_model(states, goals)
         loss = F.cross_entropy(preds, targets, reduction="none")
         val_loss += loss.sum().item()
-        val_correct += np.sum(np.argmax(preds.cpu().numpy(), axis=-1) == correct_actions)
+        val_correct += (preds.argmax(dim=-1) == correct_actions).sum()
         val_total += len(states)
 
     def policy_fn(state, goal):
       with torch.no_grad():
-        probs = F.softmax(policy_model(torch.as_tensor([state]), torch.as_tensor([goal])), dim=-1)
+        probs = F.softmax(policy_model(state, goal), dim=-1)
         return torch.multinomial(probs, 1).item()
     win_rate = evaluate_policy(env, policy_fn, 1000, 20)
 

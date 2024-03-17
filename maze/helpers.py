@@ -1,11 +1,12 @@
 import random
 import numpy as np
+import torch
 from tqdm import trange
 
-def batch(data, indices=None):
+def batch(data, indices=None, device=torch.device('cpu')):
   if indices is not None:
     data = [data[i] for i in indices]
-  return tuple(map(np.array, zip(*data)))
+  return tuple(torch.as_tensor(np.array(x), device=device) for x in zip(*data))
 
 def generate_data(env, num_episodes, num_steps, split="train"):
   steps = []
@@ -16,21 +17,20 @@ def generate_data(env, num_episodes, num_steps, split="train"):
       solution = env.solve()
       correct_action = solution[0] if solution else random.randrange(env.action_space.n)
       action = random.randrange(env.action_space.n)
-      next_state, reward, done, _, _ = env.step(action)
-      new_solution = env.solve()
-      steps.append((state, goal, action, next_state, correct_action, len(solution), len(new_solution)))
+      next_state, _, done, _, _ = env.step(action)
+      steps.append((state, goal, action, next_state, done, correct_action))
       state = next_state
       # if done:
       #   break
 
   return steps
 
-def evaluate_policy(env, policy, num_episodes, num_steps):
+def evaluate_policy(env, policy, num_episodes, num_steps, device=torch.device('cpu')):
   sucesses = 0
   for _ in trange(num_episodes, desc="Evaluating policy", leave=False):
     state, goal, _ = env.reset()
     for _ in range(num_steps):
-      action = policy(state, goal)
+      action = policy(torch.as_tensor(state)[None].to(device), torch.as_tensor(goal)[None].to(device))
       state, _, done, _, _ = env.step(action)
       if done:
         sucesses += 1
