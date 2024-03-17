@@ -139,12 +139,14 @@ if __name__ == "__main__":
   env = MazeEnv(WIDTH, HEIGHT)
 
   policy_model, distance_model = None, None
-  if (Path(__file__).parent / 'checkpoints/policy-db.ckpt').exists():
+  policy_ckpt = 'policy-vb.ckpt'
+  distance_ckpt = 'value.ckpt'
+  if (Path(__file__).parent / 'checkpoints' / policy_ckpt).exists():
     policy_model = MLP(math.prod(env.observation_space.shape), env.action_space.n).train()
-    policy_model.load_state_dict(torch.load(Path(__file__).parent / 'checkpoints/policy-db.ckpt'))
-  if (Path(__file__).parent / 'checkpoints/distance.ckpt').exists():
+    policy_model.load_state_dict(torch.load(Path(__file__).parent / 'checkpoints' / policy_ckpt))
+  if (Path(__file__).parent / 'checkpoints' / distance_ckpt).exists():
     distance_model = MLP(math.prod(env.observation_space.shape), env.action_space.n).train()  # Assuming the distance model predicts a single value
-    distance_model.load_state_dict(torch.load(Path(__file__).parent / 'checkpoints/distance.ckpt'))
+    distance_model.load_state_dict(torch.load(Path(__file__).parent / 'checkpoints' / distance_ckpt))
 
   pygame.init()
   screen = pygame.display.set_mode((WIDTH * SCALE, HEIGHT * SCALE + PADDING))

@@ -11,7 +11,7 @@ from maze.helpers import batch, generate_data, evaluate_policy
 NUM_EPISODES = 10000
 NUM_STEPS = 10
 BATCH_SIZE = 128
-ALPHA = 0.995  # Polyak averaging coefficient
+ALPHA = 0.998  # Polyak averaging coefficient
 
 def train():
   env = MazeEnv(7, 7)
@@ -23,7 +23,7 @@ def train():
   train_steps = generate_data(env, NUM_EPISODES, NUM_STEPS, split="train")
   val_steps = generate_data(env, NUM_EPISODES, NUM_STEPS, split="val")
 
-  for _ in range(10):
+  for _ in range(15):
 
     # training
     train_loss = 0
