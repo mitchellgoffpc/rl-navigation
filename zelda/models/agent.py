@@ -16,7 +16,6 @@ class ZeldaAgent(nn.Module):
     self.fc2 = nn.Linear(128, output_size)
 
   def forward(self, state, goal):
-    b,h,w,c = state.shape
     device = self.fc1.weight.device
     state = torch.as_tensor(state).permute(0,3,1,2).contiguous().float().to(device)
     goal = torch.as_tensor(goal).permute(0,3,1,2).contiguous().float().to(device)

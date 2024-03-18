@@ -1,12 +1,6 @@
 import random
-import numpy as np
 import torch
 from tqdm import trange
-
-def batch(data, indices=None, device=torch.device('cpu')):
-  if indices is not None:
-    data = [data[i] for i in indices]
-  return tuple(torch.as_tensor(np.array(x), device=device) for x in zip(*data))
 
 def generate_data(env, num_episodes, num_steps, split="train"):
   steps = []

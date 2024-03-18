@@ -4,9 +4,10 @@ import torch
 import torch.nn.functional as F
 from pathlib import Path
 from tqdm import trange
+from common.helpers import batch
 from maze.models import MLP
 from maze.environment import MazeEnv
-from maze.helpers import batch, generate_data, evaluate_policy
+from maze.helpers import generate_data, evaluate_policy
 
 NUM_EPISODES = 10000
 NUM_STEPS = 10
