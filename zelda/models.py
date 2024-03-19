@@ -5,7 +5,7 @@ import torchvision
 
 INPUT_SIZE = (240, 256, 3)
 
-class ZeldaAgent(nn.Module):
+class ResNet(nn.Module):
   def __init__(self, output_size):
     super().__init__()
     resnet = torchvision.models.resnet18(weights=torchvision.models.ResNet18_Weights.DEFAULT)
