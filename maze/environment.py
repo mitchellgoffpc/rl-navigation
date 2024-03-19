@@ -224,7 +224,6 @@ if __name__ == "__main__":
         elif event.key in (pygame.K_a, pygame.K_LEFT):
           action = 3
 
-
     if action is None:
       continue
 
