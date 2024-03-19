@@ -9,7 +9,7 @@ from torch.utils.data import Dataset
 class ZeldaDataset(Dataset):
   def __init__(self, data_type='expert', subsample=1, max_episode_len=None, max_goal_dist=None):
     assert data_type in ['expert', 'random'], 'data type should be either expert or random'
-    self.data_dir = Path(__file__).parent / data_type / 'data'
+    self.data_dir = Path(__file__).parent / data_type
     self.max_goal_dist = max_goal_dist or np.inf
     self.subsample = subsample
 
