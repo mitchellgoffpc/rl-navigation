@@ -23,6 +23,15 @@ class ZeldaDataset(Dataset):
   def __len__(self):
     return int(sum(self.episode_lens.values()) * self.subsample)
 
+  def __getitem__(self, idx):
+    episode_idx, step_idx = self.get_step_idx(idx)
+    goal_step_idx = self.get_goal_idx(episode_idx, step_idx)
+
+    state, action, pos = self.get_step_data(episode_idx, step_idx)
+    goal_state, _, goal_pos = self.get_step_data(episode_idx, goal_step_idx)
+    next_state, *_ = self.get_step_data(episode_idx, step_idx + 1)
+    return state, goal_state, action, next_state, {'distance': goal_step_idx - step_idx, 'pos': pos, 'goal_pos': goal_pos}
+
   def get_step_idx(self, idx):
     episode_idx = np.searchsorted(self.cum_episode_lens, idx, side='right') - 1
     step_idx = idx - self.cum_episode_lens[episode_idx]
@@ -36,46 +45,5 @@ class ZeldaDataset(Dataset):
     step = np.load(self.data_dir / f'episode_{episode_idx}_step_{step_idx}.npz')
     state = torch.from_numpy(step['frame'])
     action = torch.tensor(step['action'], dtype=torch.long)
-    map_pos = torch.from_numpy(step['map_pos'])
-    screen_pos = torch.from_numpy(step['screen_pos'])
-    return state, action, map_pos, screen_pos
-
-
-class ImitationDataset(ZeldaDataset):
-  def __getitem__(self, idx):
-    episode_idx, step_idx = self.get_step_idx(idx)
-    goal_step_idx = self.get_goal_idx(episode_idx, step_idx)
-
-    state, action, map_pos, screen_pos = self.get_step_data(episode_idx, step_idx)
-    goal_state, *_ = self.get_step_data(episode_idx, goal_step_idx)
-    return state, goal_state, action, {'distance': goal_step_idx - step_idx, 'map_pos': map_pos, 'screen_pos': screen_pos}
-
-class RLDataset(ZeldaDataset):
-  def __getitem__(self, idx):
-    episode_idx, step_idx = self.get_step_idx(idx)
-    goal_step_idx = self.get_goal_idx(episode_idx, step_idx)
-
-    state, action, map_pos, screen_pos = self.get_step_data(episode_idx, step_idx)
-    goal_state, *_ = self.get_step_data(episode_idx, goal_step_idx)
-    next_state, *_ = self.get_step_data(episode_idx, step_idx + 1)
-    return state, goal_state, action, next_state, {'distance': goal_step_idx - step_idx, 'map_pos': map_pos, 'screen_pos': screen_pos}
-
-class ValidationDataset(ZeldaDataset):
-  def __init__(self):
-    super().__init__('expert')
-    initial_map_pos = tuple(np.load(self.data_dir / f'episode_0_step_0.npz')['map_pos'])
-
-    self.episode_lens = []
-    for episode_idx in range(self.num_episodes):
-      map_positions = [tuple(np.load(self.data_dir / f'episode_{episode_idx}_step_{i}.npz')['map_pos']) for i in range(self.episode_len)]
-      self.episode_lens.append(next((i for i, map_pos in enumerate(map_positions) if map_pos != initial_map_pos), 0))
-    self.cum_episode_lens = np.cumsum([0] + self.episode_lens)
-
-  def __getitem__(self, idx):
-    episode_idx, step_idx = self.get_step_idx(idx)
-    goal_step_idx = self.get_goal_idx(episode_idx, step_idx)
-
-    state, _, map_pos, screen_pos = self.get_step_data(episode_idx, step_idx)
-    goal_state, _, goal_map_pos, _ = self.get_step_data(episode_idx, goal_step_idx)
-    action = {(7, 6, 0): 0, (6, 7, 0): 2, (8, 7, 0): 3}[tuple(goal_map_pos.numpy())]
-    return state, goal_state, action, {'distance': goal_step_idx - step_idx, 'map_pos': map_pos, 'screen_pos': screen_pos}
+    pos = torch.from_numpy(step['pos'])
+    return state, action, pos

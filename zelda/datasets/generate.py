@@ -16,7 +16,7 @@ def generate_random_episode(i):
 
   for j in range(NUM_STEPS):
     action = env.action_space.sample()
-    np.savez_compressed(dir_path / f'episode_{i}_step_{j}.npz', frame=obs, action=action, map_pos=info['map_pos'], screen_pos=info['screen_pos'])
+    np.savez_compressed(dir_path / f'episode_{i}_step_{j}.npz', frame=obs, action=action, pos=info['pos'])
     for _ in range(NUM_REPEATS):
       obs, _, _, _, info = env.step(action)
 
@@ -60,7 +60,7 @@ def generate_expert_episodes():
         if keys[key]:
           obs, info = env.step(KEYS_TO_ACTIONS[key])
           fn = data_dir / f'episode_{i}_step_{step}.npz'
-          np.savez_compressed(fn, frame=obs, action=action, map_pos=info['map_pos'], screen_pos=info['screen_pos'])
+          np.savez_compressed(fn, frame=obs, action=action, pos=info['pos'])
           step += 1
 
       screen.blit(pygame.surfarray.make_surface(obs.swapaxes(0, 1)), (0, 0))

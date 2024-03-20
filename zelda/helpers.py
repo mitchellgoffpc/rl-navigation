@@ -43,3 +43,11 @@ def evaluate_model(env, policy, goals, goal_positions, num_steps, num_repeats=8)
           break
 
   return finished
+
+def correct_actions(pos, goal_pos):
+  mask = torch.zeros((len(pos), 4), dtype=bool)
+  mask[..., 0] = pos[..., 1] < goal_pos[..., 1]
+  mask[..., 1] = pos[..., 1] > goal_pos[..., 1]
+  mask[..., 2] = pos[..., 0] < goal_pos[..., 0]
+  mask[..., 3] = pos[..., 0] > goal_pos[..., 0]
+  return mask
