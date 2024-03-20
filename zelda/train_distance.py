@@ -6,10 +6,10 @@ import torch.nn.functional as F
 from pathlib import Path
 from tqdm import tqdm, trange
 from torch.utils.data import Dataset, DataLoader
-
-from zelda.models import ZeldaAgent
+from common.helpers import get_device, save_checkpoint
+from zelda.models import ResNet
 from zelda.environment import ZeldaEnvironment
-from zelda.helpers import get_device, save_checkpoint, generate_rollout, generate_goals, evaluate_model
+from zelda.helpers import generate_rollout, generate_goals, evaluate_model
 
 
 NUM_EPISODES = 16
@@ -177,8 +177,8 @@ def filter_edges(distance_model, edges, num_edges):
 if __name__ == "__main__":
   device = get_device()
   env = ZeldaEnvironment()
-  distance_model = ZeldaAgent(2).to(device)
-  policy_model = ZeldaAgent(4).to(device)
+  distance_model = ResNet(2).to(device)
+  policy_model = ResNet(4).to(device)
   train_edges, test_edges = None, None
 
   for i in range(3):
@@ -190,17 +190,16 @@ if __name__ == "__main__":
     test_edges = test_edges[:len(test_edges) // 10]
 
     # reset the distance model
-    distance_model = ZeldaAgent(2).to(device)
+    distance_model = ResNet(2).to(device)
 
     # train distance and policy models
     train_distance_model(device, distance_model, train_edges[:len(train_edges) // 2], test_edges)
     train_edges = filter_edges(distance_model, train_edges, len(train_edges) // 4)
     train_policy_model(device, policy_model, train_edges, test_edges)
-    print("")
 
     def policy(obs, goal):
       action_probs = policy_model(obs, goal).softmax(-1)
-      action = torch.multinomial(action_probs, 1).cpu().numpy().squeeze()
+      action = torch.multinomial(action_probs, 1).cpu().numpy().squeeze().item()
       return action
 
     goal_states, goal_positions = generate_goals(env, num_goals=16, num_steps=NUM_STEPS)

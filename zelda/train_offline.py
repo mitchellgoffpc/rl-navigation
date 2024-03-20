@@ -2,6 +2,7 @@ import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from tqdm import tqdm
+from pathlib import Path
 from common.helpers import get_device
 from zelda.models import ResNet
 from zelda.datasets import ZeldaDataset
@@ -10,10 +11,14 @@ from zelda.helpers import correct_actions
 NUM_EPOCHS = 20
 BATCH_SIZE = 32
 LEARNING_RATE = 3e-4
-ALPHA = 0.990  # for target model update
+ALPHA = 0.999  # for target model update
 
 device = get_device()
+checkpoint = torch.load(Path(__file__).parent / 'checkpoints/distance.ckpt')
+checkpoint['fc2.weight'] = checkpoint['fc2.weight'][:1].repeat(4, 1)
+checkpoint['fc2.bias'] = checkpoint['fc2.bias'][:1].repeat(4)
 value_model = ResNet(4).to(device)
+value_model.load_state_dict(checkpoint)
 target_model = ResNet(4).to(device)
 target_model.load_state_dict(value_model.state_dict())
 optimizer = torch.optim.AdamW(value_model.parameters(), lr=LEARNING_RATE)
@@ -65,7 +70,3 @@ for epoch in range(NUM_EPOCHS):
     pbar.set_description(f"VAL | Epoch {epoch + 1}/{NUM_EPOCHS} | Loss: {loss.item():.3f} | Accuracy: {train_correct/train_total*100:.2f}%")
 
   print(f"Epoch {epoch + 1}/{NUM_EPOCHS} | Train Accuracy: {train_correct/train_total*100:.2f}% | Val Accuracy: {val_correct/val_total*100:.2f}%")
-
-
-if __name__ == '__main__':
-  train()
