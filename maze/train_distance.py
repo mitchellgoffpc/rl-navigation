@@ -27,14 +27,17 @@ def train():
     train_loss = 0
     train_total = 0
     distance_model.train()
-    for i in trange(0, len(train_steps), BATCH_SIZE, leave=False, desc="DISTANCE - TRAIN"):
-      episode_idxs = np.random.randint(0, NUM_EPISODES, size=BATCH_SIZE)
-      start_idxs = np.random.randint(0, NUM_STEPS - 1, size=BATCH_SIZE)
-      state_idxs = episode_idxs * NUM_STEPS + start_idxs # np.random.randint(0, NUM_STEPS, size=BATCH_SIZE)
-      goal_idxs = episode_idxs * NUM_STEPS + np.random.randint(start_idxs + 1, NUM_STEPS, size=BATCH_SIZE)
-      states, _, actions, *_ = batch(train_steps, state_idxs, device=device)
+    for _ in trange(0, len(train_steps), BATCH_SIZE, leave=False, desc="DISTANCE - TRAIN"):
+      state_idxs = np.random.randint(0, len(train_steps) - 1, size=BATCH_SIZE)
+      states, _, actions, *_, steps_left, success = batch(train_steps, state_idxs, device=device)
+      goal_idxs = np.random.randint(state_idxs, state_idxs + steps_left.numpy() + 1, size=BATCH_SIZE)
+      goal_idxs = np.where(steps_left.numpy() == 0, state_idxs, goal_idxs)  # Since numpy doesn't support randint with low == high
       goals, *_ = batch(train_steps, goal_idxs)
-      step_diffs = goal_idxs - state_idxs # np.abs(state_idxs - goal_idxs)
+      step_diffs = goal_idxs - state_idxs
+
+      diffs = (states != goals).sum(dim=[1, 2])  # Assuming states and goals are 4D (batch, channel, height, width)
+      assert torch.all(diffs <= 2), "States and goals differ in more than two pixels per pair."
+      assert np.all(step_diffs >= 0)
 
       preds = distance_model(states, goals)
       preds = preds[torch.arange(len(actions)), actions]
@@ -50,14 +53,13 @@ def train():
     val_total = 0
     distance_model.eval()
     with torch.no_grad():
-      for i in trange(0, len(val_steps), BATCH_SIZE, leave=False, desc="DISTANCE - VAL"):
-        episode_idxs = np.random.randint(0, NUM_EPISODES, size=BATCH_SIZE)
-        start_idxs = np.random.randint(0, NUM_STEPS - 1, size=BATCH_SIZE)
-        state_idxs = episode_idxs * NUM_STEPS + start_idxs # np.random.randint(0, NUM_STEPS, size=BATCH_SIZE)
-        goal_idxs = episode_idxs * NUM_STEPS + np.random.randint(start_idxs + 1, NUM_STEPS, size=BATCH_SIZE)
-        states, _, actions, *_ = batch(val_steps, state_idxs, device=device)
-        goals, *_ = batch(val_steps, goal_idxs)
-        step_diffs = goal_idxs - state_idxs # np.abs(state_idxs - goal_idxs)
+      for _ in trange(0, len(val_steps), BATCH_SIZE, leave=False, desc="DISTANCE - VAL"):
+        state_idxs = np.random.randint(0, len(train_steps) - 1, size=BATCH_SIZE)
+        states, _, actions, *_, steps_left, success = batch(train_steps, state_idxs, device=device)
+        goal_idxs = np.random.randint(state_idxs, state_idxs + steps_left.numpy() + 1, size=BATCH_SIZE)
+        goal_idxs = np.where(steps_left.numpy() == 0, state_idxs, goal_idxs)  # Since numpy doesn't support randint with low == high
+        goals, *_ = batch(train_steps, goal_idxs)
+        step_diffs = goal_idxs - state_idxs
 
         preds = distance_model(states, goals)
         preds = preds[torch.arange(len(actions)), actions]

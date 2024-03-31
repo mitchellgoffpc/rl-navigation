@@ -139,8 +139,8 @@ if __name__ == "__main__":
   env = MazeEnv(WIDTH, HEIGHT)
 
   policy_model, distance_model = None, None
-  policy_ckpt = 'policy-vb.ckpt'
-  distance_ckpt = 'value.ckpt'
+  policy_ckpt = 'policy-db.ckpt'
+  distance_ckpt = 'distance.ckpt'
   if (Path(__file__).parent / 'checkpoints' / policy_ckpt).exists():
     policy_model = MLP(math.prod(env.observation_space.shape), env.action_space.n).train()
     policy_model.load_state_dict(torch.load(Path(__file__).parent / 'checkpoints' / policy_ckpt))
@@ -159,6 +159,7 @@ if __name__ == "__main__":
     maze_img[obs == 2] = (255, 0, 0)
     maze_img[goal == 2] = (0, 0, 255)
     maze_img = cv2.resize(maze_img, (WIDTH * SCALE, HEIGHT * SCALE), interpolation=cv2.INTER_NEAREST)
+    maze_img = cv2.copyMakeBorder(maze_img, 0, PADDING, 0, 0, cv2.BORDER_CONSTANT, value=0)
     current_position = info['position']
 
     # Draw shortest path
@@ -172,7 +173,6 @@ if __name__ == "__main__":
 
     # Draw policy model predictions
     if policy_model is not None:
-      maze_img = cv2.copyMakeBorder(maze_img, 0, PADDING, 0, 0, cv2.BORDER_CONSTANT, value=0)
       obs_tensor = torch.tensor(obs, dtype=torch.float32)[None]
       goal_tensor = torch.tensor(goal, dtype=torch.float32)[None]
       with torch.no_grad():
@@ -197,8 +197,8 @@ if __name__ == "__main__":
       goal_tensor = torch.as_tensor(goal)[None]
       with torch.no_grad():
         distance = distance_model(obs_tensor, goal_tensor).min().item()
-      font = cv2.FONT_HERSHEY_SIMPLEX
-      cv2.putText(maze_img, f"{distance:.2f}", (maze_img.shape[1] - 50, maze_img.shape[0] - 20), font, 0.6, (255, 255, 255), 1, cv2.LINE_AA)
+      text_pos = (maze_img.shape[1] - 50, maze_img.shape[0] - 20)
+      cv2.putText(maze_img, f"{distance:.2f}", text_pos, cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1, cv2.LINE_AA)
 
     maze_surface = pygame.surfarray.make_surface(maze_img.swapaxes(0, 1))
     screen.blit(maze_surface, (0, 0))

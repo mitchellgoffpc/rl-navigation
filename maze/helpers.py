@@ -5,17 +5,19 @@ from tqdm import trange
 def generate_data(env, num_episodes, num_steps, split="train"):
   steps = []
   for _ in trange(num_episodes, desc=f"Generating {split} set"):
+    episode = []
+    goal_reached = False
     state, goal, _ = env.reset()
-    for i in range(num_steps):
-      # correct_action = env.solve()[0]
-      solution = env.solve()
-      correct_action = solution[0] if solution else random.randrange(env.action_space.n)
+    for _ in range(num_steps):
+      correct_action = env.solve()[0]
       action = random.randrange(env.action_space.n)
       next_state, _, done, _, _ = env.step(action)
-      steps.append((state, goal, action, next_state, done, correct_action))
+      episode.append((state, goal, action, next_state, done, correct_action))
+      if done:
+        goal_reached = True
+        break
       state = next_state
-      # if done:
-      #   break
+    steps.extend([(*step, len(episode) - i - 1, goal_reached) for i, step in enumerate(episode)])
 
   return steps
 
